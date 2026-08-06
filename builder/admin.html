@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Panel de administración</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-admin">
+    <aside class="barra-admin">
+      <h1>Panel de control</h1>
+      <p class="subtitulo">gestiona tu sitio</p>
+
+      <ul class="lista-paginas" id="lista-paginas"></ul>
+
+      <button class="boton-fantasma" id="btn-nueva-pagina">+ Nueva página</button>
+      <br /><br />
+      <button class="boton-fantasma" id="btn-reiniciar">↺ Reiniciar todo</button>
+      <br /><br />
+      <a class="enlace-previa" href="index.html" target="_blank" style="color:#dce8f2;">Ver sitio completo →</a>
+    </aside>
+    <section class="contenido-admin" id="contenido-admin">
+      <!-- El editor de la página seleccionada se dibuja aquí -->
+    </section>
+  </div>
+
+  <script src="js/store.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>
