@@ -8,6 +8,65 @@
    ============================================================ */
 
 const CLAVE_ALMACEN = "miniwix_datos_v1";
+const CLAVE_BACKUP_PREFIX = "miniwix_backup_v1_";
+const MAX_BACKUPS = 5;
+
+const ESQUEMAS_URL_PERMITIDOS = [
+  "http://",
+  "https://",
+  "#",
+  "/",
+  "./",
+  "../",
+  "mailto:",
+  "tel:",
+];
+
+function esUrlSegura(url) {
+  if (url === null || url === undefined) return true;
+  const str = String(url).trim();
+  if (!str) return true;
+  const lower = str.toLowerCase();
+  if (lower.startsWith("javascript:") || lower.startsWith("vbscript:") || lower.startsWith("data:text/html")) {
+    return false;
+  }
+  if (lower.startsWith("data:") && !lower.startsWith("data:image/")) {
+    return false;
+  }
+  if (/^[a-z]+:/i.test(str)) {
+    return ESQUEMAS_URL_PERMITIDOS.some((esquema) => lower.startsWith(esquema.toLowerCase()));
+  }
+  return true;
+}
+
+function sanitizarUrl(url) {
+  if (!esUrlSegura(url)) return "#";
+  return url;
+}
+
+function sanitizarBloqueRecursivo(bloque) {
+  const b = { ...bloque };
+  b.datos = b.datos ? { ...b.datos } : {};
+  const d = b.datos;
+  const camposUrl = ["url", "enlace", "botonEnlace", "imagen"];
+  camposUrl.forEach((campo) => {
+    if (typeof d[campo] === "string") d[campo] = sanitizarUrl(d[campo]);
+  });
+  if (Array.isArray(d.items)) {
+    d.items = d.items.map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object") {
+        const copia = { ...item };
+        camposUrl.forEach((campo) => {
+          if (typeof copia[campo] === "string") copia[campo] = sanitizarUrl(copia[campo]);
+        });
+        return copia;
+      }
+      return item;
+    });
+  }
+  return b;
+}
 
 /* Estructura por defecto la primera vez que alguien abre el
    sitio (todavía no ha creado nada). */
@@ -116,13 +175,159 @@ function obtenerDatos() {
   }
 }
 
+function hacerBackup() {
+  try {
+    const actual = localStorage.getItem(CLAVE_ALMACEN);
+    if (!actual) return;
+    const marca = new Date().toISOString().replace(/[:.]/g, "-");
+    const clave = CLAVE_BACKUP_PREFIX + marca;
+    localStorage.setItem(clave, actual);
+    const claves = Object.keys(localStorage)
+      .filter((k) => k.startsWith(CLAVE_BACKUP_PREFIX))
+      .sort();
+    while (claves.length > MAX_BACKUPS) {
+      const masVieja = claves.shift();
+      localStorage.removeItem(masVieja);
+    }
+  } catch (e) {
+    console.warn("No se pudo crear backup:", e);
+  }
+}
+
+function listarBackups() {
+  return Object.keys(localStorage)
+    .filter((k) => k.startsWith(CLAVE_BACKUP_PREFIX))
+    .sort()
+    .reverse()
+    .map((clave) => {
+      const marca = clave.slice(CLAVE_BACKUP_PREFIX.length).replace(/-/g, ":").replace(/^(\d{4}:\d{2}:\d{2}T)/, (m) => m.replace(/:/g, "-"));
+      let tamano = 0;
+      try {
+        tamano = (localStorage.getItem(clave) || "").length;
+      } catch {}
+      return { clave, marca, tamano };
+    });
+}
+
+function restaurarBackup(clave) {
+  const datos = localStorage.getItem(clave);
+  if (!datos) throw new Error("Backup no encontrado.");
+  hacerBackup();
+  localStorage.setItem(CLAVE_ALMACEN, datos);
+  return obtenerDatos();
+}
+
+function usoAlmacenamiento() {
+  try {
+    let total = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      const v = localStorage.getItem(k) || "";
+      total += (k.length + v.length) * 2;
+    }
+    const limiteEstimado = 5 * 1024 * 1024;
+    return {
+      bytes: total,
+      kb: Math.round(total / 1024),
+      mb: +(total / 1024 / 1024).toFixed(2),
+      porcentaje: Math.min(100, Math.round((total / limiteEstimado) * 100)),
+      limiteEstimadoMb: 5,
+    };
+  } catch (e) {
+    return { bytes: 0, kb: 0, mb: 0, porcentaje: 0, limiteEstimadoMb: 5, error: true };
+  }
+}
+
+let ultimoAvisoCuota = 0;
 function guardarDatos(datos) {
-  localStorage.setItem(CLAVE_ALMACEN, JSON.stringify(datos));
+  if (datos && Array.isArray(datos.proyectos)) {
+    datos.proyectos = datos.proyectos.map((proyecto) => ({
+      ...proyecto,
+      paginas: Array.isArray(proyecto.paginas)
+        ? proyecto.paginas.map((pagina) => ({
+            ...pagina,
+            bloques: Array.isArray(pagina.bloques) ? pagina.bloques.map(sanitizarBloqueRecursivo) : [],
+          }))
+        : [],
+    }));
+  }
+  hacerBackup();
+  const serializado = JSON.stringify(datos);
+  try {
+    localStorage.setItem(CLAVE_ALMACEN, serializado);
+  } catch (e) {
+    const nombre = (e && e.name) ? e.name : "Error";
+    if (nombre === "QuotaExceededError" || nombre === "NS_ERROR_DOM_QUOTA_REACHED" || serializado.length > 4_500_000) {
+      const uso = usoAlmacenamiento();
+      const ahora = Date.now();
+      if (ahora - ultimoAvisoCuota > 5000) {
+        ultimoAvisoCuota = ahora;
+        const msg = `⚠️ ALMACENAMIENTO LLENO (${uso.mb}MB / ${uso.limiteEstimadoMb}MB aprox.).\n\nExporta tu sitio como JSON (Botón Exportar), elimina imágenes grandes o contacta al desarrollador para migrar a un servidor.`;
+        if (typeof alert === "function") {
+          try { alert(msg); } catch {}
+        }
+        console.error(msg);
+      }
+    }
+    throw e;
+  }
 }
 
 function exportarDatosComoJson() {
   return JSON.stringify(obtenerDatos(), null, 2);
 }
+
+function validarEsquemaDatos(obj) {
+  const errores = [];
+  if (!obj || typeof obj !== "object") {
+    errores.push("Raíz no es un objeto.");
+    return errores;
+  }
+  if (!obj.config || typeof obj.config !== "object") {
+    errores.push("Falta campo 'config' como objeto.");
+  } else {
+    const camposConfigString = ["nombreSitio", "sloganSitio", "paginaInicioSlug", "colorPrincipal", "colorAcento", "colorFondo", "colorTexto", "fuenteCabecera", "fuenteCuerpo", "anchoContenido", "footerTexto", "footerEnlace"];
+    camposConfigString.forEach((c) => {
+      if (obj.config[c] !== undefined && typeof obj.config[c] !== "string") {
+        errores.push(`config.${c} debe ser string.`);
+      }
+    });
+  }
+  if (!Array.isArray(obj.proyectos)) {
+    errores.push("Falta campo 'proyectos' como array.");
+    return errores;
+  }
+  const TIPOS_BLOQUE_PERMITIDOS = new Set(Object.keys(ETIQUETAS_TIPO_BLOQUE_DEFAULT || ["titulo","parrafo","imagen","boton","separador","lista","video","galeria","contacto","cita","hero","cards","testimonios","faq","seccion","columnas"]));
+  obj.proyectos.forEach((proy, pi) => {
+    if (!proy || typeof proy !== "object") { errores.push(`proyectos[${pi}] no es objeto.`); return; }
+    if (typeof proy.titulo !== "string" || !proy.titulo.trim()) errores.push(`proyectos[${pi}].titulo inválido.`);
+    if (typeof proy.slug !== "string" || !proy.slug.trim()) errores.push(`proyectos[${pi}].slug inválido.`);
+    if (!Array.isArray(proy.paginas)) { errores.push(`proyectos[${pi}].paginas no es array.`); return; }
+    proy.paginas.forEach((pag, pgi) => {
+      if (!pag || typeof pag !== "object") { errores.push(`proyectos[${pi}].paginas[${pgi}] no es objeto.`); return; }
+      if (typeof pag.titulo !== "string" || !pag.titulo.trim()) errores.push(`proyectos[${pi}].paginas[${pgi}].titulo inválido.`);
+      if (typeof pag.slug !== "string" || !pag.slug.trim()) errores.push(`proyectos[${pi}].paginas[${pgi}].slug inválido.`);
+      if (!Array.isArray(pag.bloques)) { errores.push(`proyectos[${pi}].paginas[${pgi}].bloques no es array.`); return; }
+      pag.bloques.forEach((bl, bi) => {
+        if (!bl || typeof bl !== "object") { errores.push(`bloque[${pi}][${pgi}][${bi}] no es objeto.`); return; }
+        if (typeof bl.tipo !== "string" || !TIPOS_BLOQUE_PERMITIDOS.has(bl.tipo)) {
+          errores.push(`bloque[${pi}][${pgi}][${bi}].tipo '${bl.tipo}' no permitido.`);
+        }
+        if (bl.orden !== undefined && typeof bl.orden !== "number") {
+          errores.push(`bloque[${pi}][${pgi}][${bi}].orden no es number.`);
+        }
+        if (bl.datos !== undefined && typeof bl.datos !== "object") {
+          errores.push(`bloque[${pi}][${pgi}][${bi}].datos no es objeto.`);
+        }
+      });
+    });
+  });
+  return errores;
+}
+
+const ETIQUETAS_TIPO_BLOQUE_DEFAULT = {
+  titulo: 1, parrafo: 1, imagen: 1, boton: 1, separador: 1, lista: 1, video: 1, galeria: 1, contacto: 1, cita: 1, hero: 1, cards: 1, testimonios: 1, faq: 1, seccion: 1, columnas: 1,
+};
 
 function importarDatosDesdeJson(texto) {
   if (typeof texto !== "string" || !texto.trim()) {
@@ -134,6 +339,12 @@ function importarDatosDesdeJson(texto) {
     datosImportados = JSON.parse(texto);
   } catch (error) {
     throw new Error("El archivo no es un JSON válido.");
+  }
+
+  const erroresEsquema = validarEsquemaDatos(datosImportados);
+  if (erroresEsquema.length > 0) {
+    const resumen = erroresEsquema.slice(0, 5).join("\n - ") + (erroresEsquema.length > 5 ? `\n ... y ${erroresEsquema.length - 5} errores más.` : "");
+    throw new Error("El archivo no tiene el formato esperado:\n - " + resumen);
   }
 
   if (!datosImportados || typeof datosImportados !== "object" || !datosImportados.config || typeof datosImportados.config !== "object") {
@@ -170,7 +381,7 @@ function importarDatosDesdeJson(texto) {
             titulo: pagina.titulo || "Página",
             slug: generarSlug(pagina.slug || pagina.titulo || "pagina") || "pagina",
             bloques: Array.isArray(pagina.bloques)
-              ? pagina.bloques.map((bloque) => ({
+              ? pagina.bloques.map((bloque) => sanitizarBloqueRecursivo({
                   ...bloque,
                   id: bloque.id || generarId(),
                   tipo: bloque.tipo || "parrafo",
@@ -333,7 +544,7 @@ function agregarBloque(paginaId, tipo) {
   const { pagina } = buscarPaginaPorId(paginaId, datos);
   if (!pagina) return null;
   const orden = pagina.bloques.length;
-  const bloque = { id: generarId(), tipo, orden, datos: datosVaciosParaTipo(tipo) };
+  const bloque = sanitizarBloqueRecursivo({ id: generarId(), tipo, orden, datos: datosVaciosParaTipo(tipo) });
   pagina.bloques.push(bloque);
   guardarDatos(datos);
   return bloque;
@@ -411,7 +622,8 @@ function actualizarBloque(paginaId, bloqueId, nuevosDatos) {
   if (!pagina) return null;
   const bloque = pagina.bloques.find((b) => b.id === bloqueId);
   if (!bloque) return null;
-  bloque.datos = { ...bloque.datos, ...nuevosDatos };
+  const fusionado = sanitizarBloqueRecursivo({ ...bloque, datos: { ...bloque.datos, ...nuevosDatos } });
+  bloque.datos = fusionado.datos;
   guardarDatos(datos);
   return bloque;
 }
@@ -477,6 +689,67 @@ function reordenarBloque(paginaId, bloqueId, bloqueReferenciaId) {
 /* ---------- Reinicio total (por si algo se rompe en clase) ---------- */
 
 function reiniciarTodo() {
+  hacerBackup();
   localStorage.removeItem(CLAVE_ALMACEN);
   return obtenerDatos();
+}
+
+/* ---------- Autenticación básica ---------- */
+
+const CLAVE_AUTH = "miniwix_auth_v1";
+
+function hashSimple(texto) {
+  let hash = 0;
+  const str = String(texto || "");
+  for (let i = 0; i < str.length; i++) {
+    const chr = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + chr;
+    hash |= 0;
+  }
+  return "h_" + Math.abs(hash).toString(36);
+}
+
+function estaProteccionActiva() {
+  try {
+    return !!localStorage.getItem(CLAVE_AUTH);
+  } catch { return false; }
+}
+
+function establecerContrasena(nueva) {
+  if (!nueva || String(nueva).length < 4) throw new Error("La contraseña debe tener al menos 4 caracteres.");
+  const token = btoa(hashSimple(nueva) + "$" + Date.now().toString(36));
+  localStorage.setItem(CLAVE_AUTH, token);
+  sessionStorage.setItem(CLAVE_AUTH, "ok");
+}
+
+function verificarContrasena(intento) {
+  const guardado = localStorage.getItem(CLAVE_AUTH);
+  if (!guardado) return true;
+  try {
+    const decodificado = atob(guardado);
+    const [hashGuardado] = decodificado.split("$");
+    if (hashSimple(intento) === hashGuardado) {
+      sessionStorage.setItem(CLAVE_AUTH, "ok");
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function estaAutenticado() {
+  try {
+    return sessionStorage.getItem(CLAVE_AUTH) === "ok" || !estaProteccionActiva();
+  } catch { return true; }
+}
+
+function cerrarSesion() {
+  try { sessionStorage.removeItem(CLAVE_AUTH); } catch {}
+}
+
+function quitarProteccion(intento) {
+  if (!verificarContrasena(intento)) throw new Error("Contraseña incorrecta.");
+  localStorage.removeItem(CLAVE_AUTH);
+  sessionStorage.setItem(CLAVE_AUTH, "ok");
 }

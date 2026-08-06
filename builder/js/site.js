@@ -109,7 +109,13 @@ function obtenerPaginaDeRuta(ruta) {
   const proyecto = obtenerProyectoPorSlug(ruta.proyectoSlug);
   if (!proyecto) return null;
   if (!ruta.paginaSlug) {
-    return proyecto.paginas[0] || null;
+    const config = obtenerConfig();
+    const slugInicio = config && config.paginaInicioSlug ? String(config.paginaInicioSlug).trim() : "";
+    let inicio = null;
+    if (slugInicio) {
+      inicio = (proyecto.paginas || []).find((p) => p.slug === slugInicio);
+    }
+    return inicio || proyecto.paginas[0] || null;
   }
   return obtenerPaginaPorSlugEnProyecto(ruta.paginaSlug, proyecto.id);
 }

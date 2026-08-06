@@ -7,6 +7,22 @@
    función, así el usuario siempre ve exactamente lo mismo.
    ============================================================ */
 
+function _esUrlSeguraRender(url) {
+  if (url === null || url === undefined) return true;
+  const str = String(url).trim();
+  if (!str) return true;
+  const lower = str.toLowerCase();
+  if (lower.startsWith("javascript:") || lower.startsWith("vbscript:") || lower.startsWith("data:text/html")) {
+    return false;
+  }
+  if (lower.startsWith("data:") && !lower.startsWith("data:image/")) return false;
+  return true;
+}
+
+function _u(url) {
+  return _esUrlSeguraRender(url) ? url : "#";
+}
+
 function escaparHtml(texto) {
   const div = document.createElement("div");
   div.textContent = texto ?? "";
@@ -15,34 +31,36 @@ function escaparHtml(texto) {
 
 function obtenerUrlEmbebida(url) {
   if (!url) return "";
+  if (!_esUrlSeguraRender(url)) return "";
   const valor = /^https?:\/\//i.test(url) ? url : `https://${url}`;
   try {
     const parsed = new URL(valor);
-    if (parsed.hostname.includes("youtube.com") || parsed.hostname.includes("youtu.be")) {
+    const host = parsed.hostname.toLowerCase();
+    if (host.includes("youtube.com") || host.includes("youtu.be")) {
       const videoId = parsed.searchParams.get("v") || parsed.pathname.split("/").filter(Boolean)[0];
-      return videoId ? `https://www.youtube.com/embed/${videoId}` : valor;
+      return videoId ? `https://www.youtube.com/embed/${videoId}` : "";
     }
-    if (parsed.hostname.includes("vimeo.com")) {
+    if (host.includes("vimeo.com")) {
       const videoId = parsed.pathname.split("/").filter(Boolean)[0];
-      return videoId ? `https://player.vimeo.com/video/${videoId}` : valor;
+      return videoId ? `https://player.vimeo.com/video/${videoId}` : "";
     }
-    return valor;
+    if (/^https?:\/\//i.test(url)) return valor;
+    return "";
   } catch {
-    return valor;
+    return "";
   }
 }
 
 function renderizarBloqueVideo(d) {
-  const url = d.url || "";
-  if (!url) {
+  const urlEmbebida = obtenerUrlEmbebida(d.url || "");
+  if (!urlEmbebida) {
     return `<div class="bloque-video bloque-video--vacia">Sin video todavía</div>`;
   }
-  const urlEmbebida = obtenerUrlEmbebida(url);
   const titulo = d.titulo ? `<p class="bloque-video__titulo">${escaparHtml(d.titulo)}</p>` : "";
   const descripcion = d.descripcion ? `<p class="bloque-video__descripcion">${escaparHtml(d.descripcion)}</p>` : "";
   return `<div class="bloque-video">
     <div class="bloque-video__marco">
-      <iframe class="bloque-video__iframe" src="${escaparHtml(urlEmbebida)}" title="${escaparHtml(d.titulo || "Video embebido")}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+      <iframe class="bloque-video__iframe" src="${escaparHtml(urlEmbebida)}" title="${escaparHtml(d.titulo || "Video embebido")}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen sandbox="allow-scripts allow-same-origin allow-presentation"></iframe>
     </div>
     ${titulo}${descripcion}
   </div>`;
@@ -56,9 +74,9 @@ function renderizarBloqueGaleria(d) {
   const imagenes = items
     .map((item) => {
       if (typeof item === "string") {
-        return `<img class="bloque-galeria__item" src="${escaparHtml(item)}" alt="" />`;
+        return `<img class="bloque-galeria__item" src="${escaparHtml(_u(item))}" alt="" loading="lazy" decoding="async" />`;
       }
-      return `<img class="bloque-galeria__item" src="${escaparHtml(item.url || "")}" alt="${escaparHtml(item.alt || "")}" />`;
+      return `<img class="bloque-galeria__item" src="${escaparHtml(_u(item.url || ""))}" alt="${escaparHtml(item.alt || "")}" loading="lazy" decoding="async" />`;
     })
     .join("");
   return `<div class="bloque-galeria">${imagenes}</div>`;
@@ -68,24 +86,72 @@ function renderizarBloqueContacto(d) {
   const titulo = d.titulo || "Contacto";
   const descripcion = d.descripcion || "";
   const textoBoton = d.boton || "Enviar";
-  return `<form class="bloque-formulario" action="#" method="post" onsubmit="return false;">
+  const emailDestino = (typeof d.email === "string" && d.email.trim()) ? d.email.trim() : "";
+  const endpoint = (typeof d.endpoint === "string" && d.endpoint.trim() && _esUrlSeguraRender(d.endpoint)) ? d.endpoint.trim() : "";
+  const metodo = endpoint ? "POST" : "GET";
+  const accion = endpoint ? endpoint : (emailDestino ? `mailto:${encodeURIComponent(emailDestino)}` : "#");
+  const onsubmit = endpoint ? "" : (emailDestino ? `return __enviarContactoMailto(this, ${JSON.stringify(emailDestino)});` : `return __mostrarAvisoContacto(this);`);
+  return `<form class="bloque-formulario" action="${escaparHtml(accion)}" method="${metodo}" ${endpoint ? 'target="_blank" rel="noopener"' : ""} onsubmit="${onsubmit}">
     <h3 class="bloque-formulario__titulo">${escaparHtml(titulo)}</h3>
     ${descripcion ? `<p class="bloque-formulario__texto">${escaparHtml(descripcion)}</p>` : ""}
     <label class="bloque-formulario__campo">
-      <span>Nombre</span>
-      <input type="text" name="nombre" placeholder="Tu nombre" />
+      <span>Nombre *</span>
+      <input type="text" name="nombre" placeholder="Tu nombre" required minlength="2" maxlength="80" />
     </label>
     <label class="bloque-formulario__campo">
-      <span>Email</span>
-      <input type="email" name="email" placeholder="tu@email.com" />
+      <span>Email *</span>
+      <input type="email" name="email" placeholder="tu@email.com" required maxlength="120" />
     </label>
     <label class="bloque-formulario__campo">
-      <span>Mensaje</span>
-      <textarea name="mensaje" rows="4" placeholder="Escribe tu mensaje"></textarea>
+      <span>Asunto</span>
+      <input type="text" name="asunto" placeholder="¿En qué podemos ayudarte?" maxlength="120" />
+    </label>
+    <label class="bloque-formulario__campo">
+      <span>Mensaje *</span>
+      <textarea name="mensaje" rows="4" placeholder="Escribe tu mensaje" required minlength="10" maxlength="2000"></textarea>
     </label>
     <button class="bloque-boton bloque-formulario__boton" type="submit">${escaparHtml(textoBoton)}</button>
+    <p class="bloque-formulario__feedback" aria-live="polite" style="display:none; margin-top:10px; padding:8px 12px; border-radius:10px; font-family:var(--fuente-mono); font-size:12px;"></p>
   </form>`;
 }
+
+window.__enviarContactoMailto = function (form, emailDestino) {
+  try {
+    const fd = new FormData(form);
+    const nombre = String(fd.get("nombre") || "").trim();
+    const email = String(fd.get("email") || "").trim();
+    const asunto = String(fd.get("asunto") || "Contacto desde el sitio").trim();
+    const mensaje = String(fd.get("mensaje") || "").trim();
+    if (!nombre || !email || !mensaje) return false;
+    const cuerpo = `Nombre: ${nombre}\nEmail: ${email}\n\n${mensaje}`;
+    const href = `mailto:${encodeURIComponent(emailDestino)}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+    const feedback = form.querySelector(".bloque-formulario__feedback");
+    window.location.href = href;
+    if (feedback) {
+      feedback.style.display = "block";
+      feedback.style.background = "rgba(28,148,76,0.12)";
+      feedback.style.color = "#1c944c";
+      feedback.textContent = "✓ Abriendo tu cliente de correo para enviar el mensaje...";
+    }
+    setTimeout(() => {
+      if (feedback && feedback.parentNode) feedback.style.display = "none";
+    }, 6000);
+  } catch (e) {
+    console.error(e);
+  }
+  return false;
+};
+
+window.__mostrarAvisoContacto = function (form) {
+  const feedback = form.querySelector(".bloque-formulario__feedback");
+  if (feedback) {
+    feedback.style.display = "block";
+    feedback.style.background = "rgba(232,99,28,0.15)";
+    feedback.style.color = "var(--acento-oscuro)";
+    feedback.textContent = "⚠️ El administrador aún no ha configurado un email de destino. Por favor, contacta de otra manera.";
+  }
+  return false;
+};
 
 function obtenerClaseTamano(datos) {
   switch (datos.tamano) {
@@ -125,9 +191,9 @@ function renderizarBloqueHero(d) {
     <div class="bloque-hero__contenido">
       <h2>${escaparHtml(d.titulo || "Tu título aquí")}</h2>
       <p>${escaparHtml(d.descripcion || "Describe tu propuesta aquí")}</p>
-      ${d.botonTexto ? `<a class="bloque-boton" href="${escaparHtml(d.botonEnlace || "#")}">${escaparHtml(d.botonTexto)}</a>` : ""}
+      ${d.botonTexto ? `<a class="bloque-boton" href="${escaparHtml(_u(d.botonEnlace || "#"))}">${escaparHtml(d.botonTexto)}</a>` : ""}
     </div>
-    ${d.imagen ? `<img class="bloque-hero__imagen" src="${escaparHtml(d.imagen)}" alt="${escaparHtml(d.alt || "")}" />` : ""}
+    ${d.imagen ? `<img class="bloque-hero__imagen" src="${escaparHtml(_u(d.imagen))}" alt="${escaparHtml(d.alt || "")}" loading="eager" decoding="async" />` : ""}
   </section>`;
 }
 
@@ -140,7 +206,7 @@ function renderizarBloqueCards(d) {
     return `<article class="bloque-card">
       ${item.titulo ? `<h3>${escaparHtml(item.titulo)}</h3>` : ""}
       ${item.descripcion ? `<p>${escaparHtml(item.descripcion)}</p>` : ""}
-      ${item.enlace ? `<a href="${escaparHtml(item.enlace)}">Ver más</a>` : ""}
+      ${item.enlace ? `<a href="${escaparHtml(_u(item.enlace))}">Ver más</a>` : ""}
     </article>`;
   }).join("");
   return `<div class="bloque-cards">${cards}</div>`;
@@ -203,11 +269,11 @@ function renderizarBloque(bloque) {
       if (!d.url) {
         contenido = `<div class="bloque-imagen bloque-imagen--vacia">Sin imagen todavía</div>`;
       } else {
-        contenido = `<img class="bloque-imagen" src="${escaparHtml(d.url)}" alt="${escaparHtml(d.alt)}" />`;
+        contenido = `<img class="bloque-imagen" src="${escaparHtml(_u(d.url))}" alt="${escaparHtml(d.alt)}" loading="lazy" decoding="async" />`;
       }
       break;
     case "boton":
-      contenido = `<a class="bloque-boton" href="${escaparHtml(d.enlace || "#")}">${escaparHtml(d.texto)}</a>`;
+      contenido = `<a class="bloque-boton" href="${escaparHtml(_u(d.enlace || "#"))}">${escaparHtml(d.texto)}</a>`;
       break;
     case "separador":
       contenido = `<hr class="bloque-separador" />`;

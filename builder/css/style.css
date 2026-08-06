@@ -185,7 +185,8 @@ main.pagina {
   border: 1px solid rgba(28, 58, 84, 0.1);
   margin: 40px auto;
   padding: 48px 56px;
-  max-width: 860px;
+  width: 100%;
+  max-width: var(--ancho-pagina, 860px);
   box-shadow: var(--sombra-card);
   border-radius: 22px;
   -webkit-backdrop-filter: blur(8px);

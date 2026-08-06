@@ -22,11 +22,27 @@ function obtenerPaginaSeleccionada() {
   return idPaginaSeleccionada ? obtenerPaginaPorId(idPaginaSeleccionada) : null;
 }
 
-function solicitarTexto(mensaje, valorPorDefecto) {
+function solicitarTexto(mensaje, valorPorDefecto, opciones) {
+  const opts = opciones || {};
+  const minLong = typeof opts.minLong === "number" ? opts.minLong : 2;
+  const maxIntentos = typeof opts.maxIntentos === "number" ? opts.maxIntentos : 3;
   try {
-    const texto = prompt(mensaje, valorPorDefecto);
-    if (texto === null) return null;
-    return texto.trim();
+    let intentos = 0;
+    while (intentos < maxIntentos) {
+      const texto = prompt(mensaje, valorPorDefecto);
+      if (texto === null) return null;
+      const limpio = texto.trim();
+      if (limpio.length === 0) {
+        alert("❌ El valor no puede estar vacío. Inténtalo de nuevo.");
+      } else if (limpio.length < minLong) {
+        alert(`❌ El valor es demasiado corto. Mínimo ${minLong} caracteres.`);
+      } else {
+        return limpio;
+      }
+      intentos++;
+    }
+    alert("Demasiados intentos. Operación cancelada.");
+    return null;
   } catch (error) {
     console.warn("prompt no disponible, usando valor por defecto:", error);
     return valorPorDefecto;
@@ -46,7 +62,88 @@ function actualizarHash() {
   }
 }
 
+function renderizarPantallaLogin() {
+  const root = document.getElementById("contenido-admin");
+  const barra = document.querySelector(".barra-admin");
+  if (barra) barra.style.display = "none";
+  root.innerHTML = `
+    <div style="min-height:100vh; display:grid; place-items:center; padding: 40px 20px;">
+      <div style="max-width: 420px; width: 100%; padding: 32px 28px; background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(236,231,218,0.95)); border: 1px solid rgba(28,58,84,0.1); border-radius: 24px; box-shadow: var(--sombra-suave);">
+        <div style="text-align:center; margin-bottom: 20px;">
+          <p class="dashboard-badge" style="margin:0 auto;">AutoPag · Panel privado</p>
+          <h1 style="font-family:var(--fuente-display); margin: 14px 0 6px; font-size: 28px;">🔐 Acceso restringido</h1>
+          <p style="color: var(--tinta-suave); line-height:1.7; margin:0;">Introduce tu contraseña para gestionar los proyectos y el contenido del sitio.</p>
+        </div>
+        <form id="form-login" autocomplete="off" style="display:flex; flex-direction:column; gap:12px;">
+          <div class="campo" style="margin:0;">
+            <label for="login-pass">Contraseña</label>
+            <input id="login-pass" type="password" autofocus placeholder="••••••••" style="width:100%; font-size:15px; padding: 11px 13px; border: 1px solid var(--linea); border-radius: 10px; background: var(--blanco);"/>
+          </div>
+          <button type="submit" class="boton-primario" style="width:100%; padding:12px 18px; font-size:14px;">Entrar al panel</button>
+          <p id="login-error" style="display:none; margin:0; padding: 10px 12px; border-radius:12px; background: rgba(179,38,30,0.12); color: #b3261e; font-family: var(--fuente-mono); font-size: 12px; text-align:center;"></p>
+        </form>
+        <p style="text-align:center; margin: 20px 0 0; font-family: var(--fuente-mono); font-size: 11px; color: var(--tinta-suave);">
+          Consejo: si perdiste la contraseña, abre la consola y ejecuta:<br/>
+          <code style="background:rgba(28,58,84,0.08); padding: 2px 6px; border-radius:4px;">localStorage.removeItem("miniwix_auth_v1")</code>
+        </p>
+      </div>
+    </div>`;
+
+  const form = document.getElementById("form-login");
+  const input = document.getElementById("login-pass");
+  const error = document.getElementById("login-error");
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const pass = input.value;
+    if (verificarContrasena(pass)) {
+      barra.style.display = "";
+      if (btnLogout) {
+        try { btnLogout.remove(); } catch {}
+        btnLogout = null;
+      }
+      iniciar();
+    } else {
+      error.style.display = "block";
+      error.textContent = "❌ Contraseña incorrecta. Inténtalo de nuevo.";
+      input.value = "";
+      input.focus();
+    }
+  });
+  input && input.focus();
+}
+
+let btnLogout = null;
+
+function anadirBotonLogout() {
+  if (!estaProteccionActiva() || btnLogout) return;
+  const barra = document.querySelector(".barra-admin");
+  if (!barra) return;
+  const enlacePrevia = barra.querySelector(".enlace-previa");
+  if (!enlacePrevia) return;
+  const br = document.createElement("br");
+  const a = document.createElement("button");
+  a.className = "boton-fantasma";
+  a.type = "button";
+  a.textContent = "🚪 Cerrar sesión";
+  a.style.marginTop = "8px";
+  a.addEventListener("click", () => {
+    if (!confirm("¿Cerrar sesión?")) return;
+    cerrarSesion();
+    window.location.reload();
+  });
+  btnLogout = a;
+  enlacePrevia.parentNode.insertBefore(br, enlacePrevia.nextSibling);
+  enlacePrevia.parentNode.insertBefore(a, br.nextSibling);
+}
+
 function iniciar() {
+  if (estaProteccionActiva && typeof estaProteccionActiva === "function" && estaProteccionActiva() && !(estaAutenticado && estaAutenticado())) {
+    renderizarPantallaLogin();
+    return;
+  }
+  anadirBotonLogout();
+
   const proyectos = listarProyectos();
   const hash = window.location.hash.replace(/^#\/?/, "");
   const partes = hash.split("/").filter(Boolean);
@@ -77,7 +174,7 @@ function iniciar() {
   document.getElementById("btn-nuevo-proyecto").addEventListener("click", crearProyectoNuevo);
   document.getElementById("btn-nueva-pagina").addEventListener("click", crearPaginaNueva);
   document.getElementById("btn-reiniciar").addEventListener("click", () => {
-    const seguro = confirm("Esto borra TODAS las páginas y bloques que hayas creado. ¿Continuar?");
+    const seguro = confirm("⚠️ Esto borra TODAS las páginas y bloques que hayas creado. Antes se creará un backup automático.\n\n¿Continuar?");
     if (!seguro) return;
     reiniciarTodo();
     idProyectoSeleccionado = listarProyectos()[0]?.id || null;
@@ -277,6 +374,38 @@ function renderizarEditor() {
           <input id="campo-ancho-contenido" type="number" min="500" max="1200" value="${escaparAtributo(config.anchoContenido || "780")}" />
         </div>
       </div>
+
+      <div class="fila-campos">
+        <div class="campo" style="flex:3;">
+          <label for="campo-footer-texto">Texto del pie de página</label>
+          <input id="campo-footer-texto" type="text" value="${escaparAtributo(config.footerTexto || "Editable desde")}" placeholder="Ej: © 2026 Mi Empresa" />
+        </div>
+        <div class="campo" style="flex:2;">
+          <label for="campo-footer-enlace">Enlace del pie de página</label>
+          <input id="campo-footer-enlace" type="text" value="${escaparAtributo(config.footerEnlace || "admin.html")}" placeholder="admin.html o https://..." />
+        </div>
+      </div>
+
+      <div style="margin-top: 6px; padding: 10px 12px; border-radius: 14px; background: linear-gradient(135deg, rgba(28,58,84,0.06), rgba(232,99,28,0.06)); border: 1px solid rgba(28,58,84,0.08); display:flex; flex-wrap:wrap; gap:14px; align-items:center; justify-content:space-between;">
+        ${(function () {
+          const u = usoAlmacenamiento ? usoAlmacenamiento() : { mb: 0, porcentaje: 0, limiteEstimadoMb: 5 };
+          const colorBarra = u.porcentaje >= 85 ? "#b3261e" : u.porcentaje >= 60 ? "#e8631c" : "#1c944c";
+          return `
+          <div style="flex:1; min-width:200px;">
+            <p class="etiqueta-tecnica" style="margin:0 0 6px;">💾 Uso de almacenamiento local</p>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <div style="flex:1; height:10px; background: rgba(28,58,84,0.1); border-radius:999px; overflow:hidden;">
+                <div style="width:${Math.min(100, u.porcentaje)}%; height:100%; background:${colorBarra}; transition: width .3s;"></div>
+              </div>
+              <span class="etiqueta-tecnica" style="margin:0;">${u.mb.toFixed(1)} MB / ~${u.limiteEstimadoMb} MB (${u.porcentaje}%)</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="boton-secundario" id="btn-gestionar-backups">🗂️ Backups (${listarBackups ? listarBackups().length : 0})</button>
+            <button type="button" class="boton-secundario" id="btn-gestionar-auth">🔐 ${estaProteccionActiva && estaProteccionActiva() ? "Cambiar contraseña" : "Proteger con contraseña"}</button>
+          </div>`;
+        })()}
+      </div>
     </div>
 
     <div class="preview-panel">
@@ -353,12 +482,110 @@ function renderizarEditor() {
       fuenteCabecera: document.getElementById("campo-fuente-cabecera").value.trim() || config.fuenteCabecera,
       fuenteCuerpo: document.getElementById("campo-fuente-cuerpo").value.trim() || config.fuenteCuerpo,
       anchoContenido: document.getElementById("campo-ancho-contenido").value.trim() || config.anchoContenido,
-      footerTexto: config.footerTexto,
-      footerEnlace: config.footerEnlace,
+      footerTexto: document.getElementById("campo-footer-texto").value.trim() !== "" ? document.getElementById("campo-footer-texto").value.trim() : config.footerTexto,
+      footerEnlace: document.getElementById("campo-footer-enlace").value.trim() !== "" ? document.getElementById("campo-footer-enlace").value.trim() : config.footerEnlace,
     });
     renderizarEditor();
-    alert("Configuración guardada correctamente.");
+    alert("✅ Configuración guardada correctamente.");
   });
+
+  const btnBackups = document.getElementById("btn-gestionar-backups");
+  if (btnBackups) {
+    btnBackups.addEventListener("click", () => {
+      const backups = listarBackups ? listarBackups() : [];
+      if (!backups.length) {
+        alert("Aún no hay backups automáticos creados. Se crearán uno nuevo en la próxima modificación.");
+        return;
+      }
+      const lista = backups.map((b, i) =>
+        `${i + 1}) [${b.marca}] — ${Math.round(b.tamano / 1024)} KB`
+      ).join("\n");
+      const elegir = prompt(
+        `Backups disponibles (${backups.length}):\n\n${lista}\n\n` +
+        `Escribe el NÚMERO del backup que quieres restaurar (1-${backups.length})\n` +
+        `O escribe 0 para cancelar:`,
+        "1"
+      );
+      if (!elegir) return;
+      const num = parseInt(elegir, 10);
+      if (!num || num < 1 || num > backups.length) return;
+      const backupElegido = backups[num - 1];
+      const confirma = confirm(
+        `⚠️ Vas a restaurar el backup ${backupElegido.marca}.\n\n` +
+        `Esto REEMPLAZARÁ todos tus datos actuales. Se guardará un backup del estado presente antes.\n\n` +
+        `¿Continuar?`
+      );
+      if (!confirma) return;
+      try {
+        restaurarBackup(backupElegido.clave);
+        idProyectoSeleccionado = listarProyectos()[0]?.id || null;
+        idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
+        renderizarBarraLateral();
+        renderizarEditor();
+        alert("✅ Backup restaurado correctamente.");
+      } catch (e) {
+        alert("❌ No se pudo restaurar el backup: " + (e.message || "Error desconocido"));
+      }
+    });
+  }
+
+  const btnAuth = document.getElementById("btn-gestionar-auth");
+  if (btnAuth) {
+    btnAuth.addEventListener("click", () => {
+      const activa = estaProteccionActiva && estaProteccionActiva();
+      if (!activa) {
+        const nueva = prompt("Introduce una NUEVA contraseña para proteger el panel (mín. 4 caracteres):\n\n(Consejo: escribe una que recordarás. Si la pierdes, tendrás que borrar manualmente localStorage.)");
+        if (!nueva) return;
+        const confirmar = prompt("Repite la misma contraseña para confirmar:");
+        if (confirmar === null) return;
+        if (nueva !== confirmar) {
+          alert("❌ Las contraseñas no coinciden. Operación cancelada.");
+          return;
+        }
+        try {
+          establecerContrasena(nueva);
+          renderizarEditor();
+          alert("✅ Contraseña establecida correctamente. El panel ahora está protegido.");
+        } catch (e) {
+          alert("❌ " + (e.message || "Error al establecer contraseña."));
+        }
+        return;
+      }
+      const accion = prompt(
+        "🔐 Panel protegido con contraseña.\n\n" +
+        "¿Qué quieres hacer?\n" +
+        "  1) Cambiar la contraseña\n" +
+        "  2) Quitar la protección\n" +
+        "  3) Cancelar\n\n" +
+        "Escribe el número de la opción:",
+        "1"
+      );
+      if (!accion) return;
+      if (accion === "1") {
+        const actual = prompt("Escribe tu contraseña ACTUAL:");
+        if (actual === null) return;
+        if (!verificarContrasena(actual)) { alert("❌ Contraseña incorrecta."); return; }
+        const nueva = prompt("Escribe la NUEVA contraseña (mín. 4 caracteres):");
+        if (!nueva) return;
+        const confirmar = prompt("Repite la nueva contraseña:");
+        if (confirmar === null) return;
+        if (nueva !== confirmar) { alert("❌ Las contraseñas nuevas no coinciden."); return; }
+        try {
+          establecerContrasena(nueva);
+          alert("✅ Contraseña cambiada correctamente.");
+          renderizarEditor();
+        } catch (e) { alert("❌ " + (e.message || "Error.")); }
+      } else if (accion === "2") {
+        const actual = prompt("Escribe tu contraseña ACTUAL para confirmar y quitar la protección:");
+        if (actual === null) return;
+        try {
+          quitarProteccion(actual);
+          alert("✅ Protección eliminada correctamente.");
+          renderizarEditor();
+        } catch (e) { alert("❌ " + (e.message || "Contraseña incorrecta.")); }
+      }
+    });
+  }
 
   document.getElementById("btn-aplicar-plantilla").addEventListener("click", () => {
     const plantilla = document.getElementById("select-plantilla").value;
@@ -417,6 +644,17 @@ function renderizarEditor() {
     const archivo = evento.target.files?.[0];
     if (!archivo) return;
 
+    const proyectosActuales = listarProyectos().length;
+    const confirma = confirm(
+      `⚠️ IMPORTANTE: Importar un archivo reemplazará TODO el contenido actual (${proyectosActuales} proyecto(s)).\n\n` +
+      `Se creará un backup automático de tu estado actual antes de importar.\n\n` +
+      `¿Estás SEGURO de continuar?`
+    );
+    if (!confirma) {
+      evento.target.value = "";
+      return;
+    }
+
     const lector = new FileReader();
     lector.onload = () => {
       try {
@@ -425,16 +663,17 @@ function renderizarEditor() {
         idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
         renderizarBarraLateral();
         renderizarEditor();
-        alert("Sitio importado correctamente.");
+        alert("✅ Sitio importado correctamente. Se ha creado un backup del estado anterior.");
       } catch (error) {
         console.error("No se pudo importar el sitio", error);
-        alert("No se pudo importar el archivo. Asegúrate de usar un JSON exportado desde este editor.");
+        alert("❌ No se pudo importar el archivo.\n\nDetalles:\n" + (error.message || "Error desconocido"));
       } finally {
         evento.target.value = "";
       }
     };
     lector.onerror = () => {
       alert("No se pudo leer el archivo seleccionado.");
+      evento.target.value = "";
     };
     lector.readAsText(archivo);
   });
@@ -612,9 +851,13 @@ function camposEditablesDeBloque(bloque) {
             <input type="text" data-campo="titulo" value="${escaparAtributo(d.titulo)}" />
           </div>
           <div class="campo" style="flex:1;">
-            <label>Correo de destino</label>
-            <input type="email" data-campo="email" value="${escaparAtributo(d.email)}" />
+            <label>Correo de destino (mailto:)</label>
+            <input type="email" data-campo="email" value="${escaparAtributo(d.email)}" placeholder="tu@email.com" />
           </div>
+        </div>
+        <div class="campo" style="margin-bottom:14px;">
+          <label>Endpoint HTTP opcional (ej: Formspree https://formspree.io/f/XXXX)</label>
+          <input type="text" data-campo="endpoint" value="${escaparAtributo(d.endpoint || "")}" placeholder="https://formspree.io/f/tu-id" />
         </div>
         <div class="fila-campos">
           <div class="campo" style="flex:2;">
@@ -753,6 +996,9 @@ function enlazarEventosDeBloques(paginaId) {
 
     tarjeta.querySelectorAll("[data-campo]").forEach((campo) => {
       campo.addEventListener("change", () => {
+        const { pagina: paginaActual } = buscarPaginaPorId(paginaId);
+        const bloque = paginaActual ? paginaActual.bloques.find((b) => b.id === bloqueId) : null;
+        const tipoBloque = bloque ? bloque.tipo : "";
         let valor = campo.value;
         if (campo.dataset.campo === "contenido") {
           valor = campo.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
@@ -765,14 +1011,14 @@ function enlazarEventosDeBloques(paginaId) {
             .filter(Boolean)
             .map((linea) => {
               const partes = linea.split("|").map((parte) => parte.trim());
-              if (bloque.tipo === "cards") {
+              if (tipoBloque === "cards") {
                 if (partes.length === 1) return { titulo: partes[0] };
                 return { titulo: partes[0] || "", descripcion: partes[1] || "", enlace: partes[2] || "" };
               }
-              if (bloque.tipo === "testimonios") {
+              if (tipoBloque === "testimonios") {
                 return { texto: partes[0] || "", autor: partes[1] || "" };
               }
-              if (bloque.tipo === "faq") {
+              if (tipoBloque === "faq") {
                 return { pregunta: partes[0] || "", respuesta: partes[1] || "" };
               }
               return { texto: linea };
