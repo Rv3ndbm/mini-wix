@@ -32,13 +32,23 @@ function pintarEncabezado() {
   const nav = document.getElementById("nav-sitio");
   const paginas = listarPaginas();
   const slugVisible = slugActual() || config.paginaInicioSlug;
+  const paginasOrdenadas = [...paginas].sort((a, b) => {
+    if (a.slug === config.paginaInicioSlug) return -1;
+    if (b.slug === config.paginaInicioSlug) return 1;
+    return 0;
+  });
 
-  nav.innerHTML = paginas
+  nav.innerHTML = paginasOrdenadas
     .map((p) => {
       const activo = p.slug === slugVisible ? " activo" : "";
       return `<li><a class="${activo.trim()}" href="#/${p.slug}">${escaparHtml(p.titulo)}</a></li>`;
     })
     .join("");
+
+  const pie = document.getElementById("pie-sitio");
+  if (pie) {
+    pie.innerHTML = `${escaparHtml(config.footerTexto || "Editable desde")} <a href="${escaparHtml(config.footerEnlace || "admin.html")}">${escaparHtml(config.footerEnlace || "admin.html")}</a>`;
+  }
 }
 
 function pintarPaginaActual() {

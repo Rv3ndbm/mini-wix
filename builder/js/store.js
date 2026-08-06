@@ -23,6 +23,8 @@ function configPorDefecto() {
     fuenteCabecera: "Space Grotesk",
     fuenteCuerpo: "Inter",
     anchoContenido: "780",
+    footerTexto: "Editable desde",
+    footerEnlace: "admin.html",
   };
 }
 
@@ -222,6 +224,33 @@ function agregarBloque(paginaId, tipo) {
   return bloque;
 }
 
+function bloquesPorPlantilla(plantilla) {
+  const plantillaNormalizada = plantilla || "vacia";
+  switch (plantillaNormalizada) {
+    case "landing":
+      return [
+        { tipo: "hero", datos: { titulo: "Tu propuesta en una frase", descripcion: "Describe tu producto o servicio aquí", botonTexto: "Conocer más", botonEnlace: "#" } },
+        { tipo: "cards", datos: { items: [{ titulo: "Servicio 1", descripcion: "Descripción breve", enlace: "#" }, { titulo: "Servicio 2", descripcion: "Otra propuesta", enlace: "#" }] } },
+        { tipo: "testimonios", datos: { items: [{ texto: "Excelente trabajo, muy recomendable.", autor: "Cliente satisfecho" }] } },
+        { tipo: "contacto", datos: { titulo: "Contáctanos", descripcion: "Escríbenos y te responderemos pronto", boton: "Enviar" } },
+      ];
+    case "empresa":
+      return [
+        { tipo: "titulo", datos: { texto: "Sobre nosotros", nivel: "h2" } },
+        { tipo: "parrafo", datos: { texto: "Somos un equipo que crea experiencias digitales claras, modernas y útiles." } },
+        { tipo: "cards", datos: { items: [{ titulo: "Diseño", descripcion: "Interfaces limpias y funcionales.", enlace: "#" }, { titulo: "Desarrollo", descripcion: "Experiencias rápidas y fiables.", enlace: "#" }] } },
+        { tipo: "faq", datos: { items: [{ pregunta: "¿Trabajáis con empresas?", respuesta: "Sí, también atendemos proyectos corporativos." }] } },
+      ];
+    case "contacto":
+      return [
+        { tipo: "hero", datos: { titulo: "Hablemos", descripcion: "Estamos listos para ayudarte con tu próximo proyecto.", botonTexto: "Enviar mensaje", botonEnlace: "#" } },
+        { tipo: "contacto", datos: { titulo: "Formulario de contacto", descripcion: "Escríbenos y te responderemos lo antes posible.", boton: "Enviar" } },
+      ];
+    default:
+      return [];
+  }
+}
+
 function datosVaciosParaTipo(tipo) {
   switch (tipo) {
     case "titulo":
@@ -281,6 +310,21 @@ function eliminarBloque(paginaId, bloqueId) {
   guardarDatos(datos);
 }
 
+function aplicarPlantillaAPagina(paginaId, plantilla) {
+  const datos = obtenerDatos();
+  const pagina = datos.paginas.find((p) => p.id === paginaId);
+  if (!pagina) return null;
+  const bloquesPlantilla = bloquesPorPlantilla(plantilla);
+  pagina.bloques = bloquesPlantilla.map((bloque, index) => ({
+    id: generarId(),
+    tipo: bloque.tipo,
+    orden: index,
+    datos: { ...datosVaciosParaTipo(bloque.tipo), ...bloque.datos },
+  }));
+  guardarDatos(datos);
+  return pagina;
+}
+
 function moverBloque(paginaId, bloqueId, direccion) {
   const datos = obtenerDatos();
   const pagina = datos.paginas.find((p) => p.id === paginaId);
@@ -294,6 +338,25 @@ function moverBloque(paginaId, bloqueId, direccion) {
   pagina.bloques[nuevoIndice] = temp;
   pagina.bloques.forEach((b, i) => (b.orden = i));
   guardarDatos(datos);
+}
+
+function reordenarBloque(paginaId, bloqueId, bloqueReferenciaId) {
+  const datos = obtenerDatos();
+  const pagina = datos.paginas.find((p) => p.id === paginaId);
+  if (!pagina) return null;
+
+  pagina.bloques.sort((a, b) => a.orden - b.orden);
+  const indiceOrigen = pagina.bloques.findIndex((b) => b.id === bloqueId);
+  const indiceReferencia = pagina.bloques.findIndex((b) => b.id === bloqueReferenciaId);
+
+  if (indiceOrigen < 0 || indiceReferencia < 0 || indiceOrigen === indiceReferencia) return null;
+
+  const [bloqueMovido] = pagina.bloques.splice(indiceOrigen, 1);
+  const indiceDestino = indiceReferencia > indiceOrigen ? indiceReferencia - 1 : indiceReferencia;
+  pagina.bloques.splice(indiceDestino, 0, bloqueMovido);
+  pagina.bloques.forEach((b, i) => (b.orden = i));
+  guardarDatos(datos);
+  return pagina.bloques;
 }
 
 /* ---------- Reinicio total (por si algo se rompe en clase) ---------- */

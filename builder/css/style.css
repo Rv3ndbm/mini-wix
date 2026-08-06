@@ -711,6 +711,30 @@ h3.bloque-titulo {
   margin-bottom: 12px;
 }
 
+.tarjeta-bloque .cabecera-bloque__titulo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tarjeta-bloque .drag-handle {
+  cursor: grab;
+  color: var(--tinta-suave);
+  font-size: 16px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.tarjeta-bloque--arrastrando {
+  opacity: 0.6;
+  border-style: dashed;
+}
+
+.tarjeta-bloque--destino {
+  border-color: var(--acento);
+  box-shadow: 0 0 0 2px rgba(232, 99, 28, 0.15);
+}
+
 .sello-tipo {
   font-family: var(--fuente-mono);
   font-size: 11px;

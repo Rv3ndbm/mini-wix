@@ -7,6 +7,7 @@
    ============================================================ */
 
 let idPaginaSeleccionada = null;
+let bloqueArrastradoId = null;
 
 function escaparAtributo(texto) {
   return escaparHtml(texto).replace(/"/g, "&quot;");
@@ -63,6 +64,13 @@ function crearPaginaNueva() {
 }
 
 /* ---------- Editor principal ---------- */
+
+function actualizarVistaPrevia(slug) {
+  const iframe = document.getElementById("preview-frame");
+  if (iframe) {
+    iframe.src = `index.html#/${encodeURIComponent(slug || "")}`;
+  }
+}
 
 function renderizarEditor() {
   const contenedor = document.getElementById("contenido-admin");
@@ -171,6 +179,21 @@ function renderizarEditor() {
       </div>
     </div>
 
+    <div class="fila-campos" style="margin-bottom:16px;">
+      <div class="campo">
+        <label for="select-plantilla">Aplicar plantilla</label>
+        <select id="select-plantilla">
+          <option value="vacia">Vacía</option>
+          <option value="landing">Landing</option>
+          <option value="empresa">Empresa</option>
+          <option value="contacto">Contacto</option>
+        </select>
+      </div>
+      <div class="campo" style="align-self:end; min-width: 180px;">
+        <button class="boton-secundario" id="btn-aplicar-plantilla">Aplicar plantilla</button>
+      </div>
+    </div>
+
     <p class="etiqueta-tecnica">Agregar bloque</p>
     <div class="paleta-bloques">
       ${Object.entries(ETIQUETAS_TIPO_BLOQUE)
@@ -197,9 +220,18 @@ function renderizarEditor() {
       fuenteCabecera: document.getElementById("campo-fuente-cabecera").value.trim() || config.fuenteCabecera,
       fuenteCuerpo: document.getElementById("campo-fuente-cuerpo").value.trim() || config.fuenteCuerpo,
       anchoContenido: document.getElementById("campo-ancho-contenido").value.trim() || config.anchoContenido,
+      footerTexto: config.footerTexto,
+      footerEnlace: config.footerEnlace,
     });
     renderizarEditor();
     alert("Configuración guardada correctamente.");
+  });
+
+  document.getElementById("btn-aplicar-plantilla").addEventListener("click", () => {
+    const plantilla = document.getElementById("select-plantilla").value;
+    aplicarPlantillaAPagina(pagina.id, plantilla);
+    actualizarVistaPrevia(pagina.slug);
+    renderizarEditor();
   });
 
   document.getElementById("btn-guardar-pagina").addEventListener("click", () => {
@@ -260,6 +292,8 @@ function renderizarEditor() {
     lector.readAsText(archivo);
   });
 
+  actualizarVistaPrevia(pagina.slug);
+
   contenedor.querySelectorAll(".chip-bloque").forEach((chip) => {
     chip.addEventListener("click", () => {
       agregarBloque(pagina.id, chip.dataset.tipo);
@@ -276,7 +310,10 @@ function renderizarTarjetaBloque(bloque, indice, total) {
   return `
     <div class="tarjeta-bloque" data-id="${bloque.id}">
       <div class="cabecera-bloque">
-        <span class="sello-tipo">${ETIQUETAS_TIPO_BLOQUE[bloque.tipo] || bloque.tipo}</span>
+        <div class="cabecera-bloque__titulo">
+          <span class="drag-handle" title="Arrastra para mover">⋮⋮</span>
+          <span class="sello-tipo">${ETIQUETAS_TIPO_BLOQUE[bloque.tipo] || bloque.tipo}</span>
+        </div>
         <div class="acciones-bloque">
           <button data-accion="subir" ${indice === 0 ? "disabled" : ""} title="Subir">↑</button>
           <button data-accion="bajar" ${indice === total - 1 ? "disabled" : ""} title="Bajar">↓</button>
@@ -508,6 +545,40 @@ function camposEditablesDeBloque(bloque) {
 function enlazarEventosDeBloques(paginaId) {
   document.querySelectorAll(".tarjeta-bloque").forEach((tarjeta) => {
     const bloqueId = tarjeta.dataset.id;
+
+    tarjeta.setAttribute("draggable", "true");
+
+    tarjeta.addEventListener("dragstart", () => {
+      bloqueArrastradoId = bloqueId;
+      tarjeta.classList.add("tarjeta-bloque--arrastrando");
+    });
+
+    tarjeta.addEventListener("dragend", () => {
+      bloqueArrastradoId = null;
+      document.querySelectorAll(".tarjeta-bloque").forEach((item) => item.classList.remove("tarjeta-bloque--destino"));
+      tarjeta.classList.remove("tarjeta-bloque--arrastrando");
+    });
+
+    tarjeta.addEventListener("dragover", (evento) => {
+      evento.preventDefault();
+      if (bloqueArrastradoId && bloqueArrastradoId !== bloqueId) {
+        tarjeta.classList.add("tarjeta-bloque--destino");
+      }
+    });
+
+    tarjeta.addEventListener("dragleave", () => {
+      tarjeta.classList.remove("tarjeta-bloque--destino");
+    });
+
+    tarjeta.addEventListener("drop", (evento) => {
+      evento.preventDefault();
+      tarjeta.classList.remove("tarjeta-bloque--destino");
+      if (bloqueArrastradoId && bloqueArrastradoId !== bloqueId) {
+        reordenarBloque(paginaId, bloqueArrastradoId, bloqueId);
+        renderizarEditor();
+      }
+      bloqueArrastradoId = null;
+    });
 
     tarjeta.querySelectorAll("[data-accion]").forEach((boton) => {
       boton.addEventListener("click", () => {
