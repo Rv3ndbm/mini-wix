@@ -33,26 +33,33 @@ function datosPorDefecto() {
   const idBienvenida = generarId();
   return {
     config: configPorDefecto(),
-    paginas: [
+    proyectos: [
       {
-        id: idInicio,
-        titulo: "Inicio",
-        slug: "inicio",
-        bloques: [
+        id: generarId(),
+        titulo: "Proyecto inicial",
+        slug: "proyecto-inicial",
+        paginas: [
           {
-            id: idBienvenida,
-            tipo: "titulo",
-            orden: 0,
-            datos: { texto: "Bienvenido a tu sitio", nivel: "h1" },
-          },
-          {
-            id: generarId(),
-            tipo: "parrafo",
-            orden: 1,
-            datos: {
-              texto:
-                "Esta página se genera sola a partir de los bloques que armes en el panel de administración. Entra a admin.html para editar este contenido o crear páginas nuevas.",
-            },
+            id: idInicio,
+            titulo: "Inicio",
+            slug: "inicio",
+            bloques: [
+              {
+                id: idBienvenida,
+                tipo: "titulo",
+                orden: 0,
+                datos: { texto: "Bienvenido a tu sitio", nivel: "h1" },
+              },
+              {
+                id: generarId(),
+                tipo: "parrafo",
+                orden: 1,
+                datos: {
+                  texto:
+                    "Esta página se genera sola a partir de los bloques que armes en el panel de administración. Entra a admin.html para editar este contenido o crear páginas nuevas.",
+                },
+              },
+            ],
           },
         ],
       },
@@ -85,7 +92,22 @@ function obtenerDatos() {
     return iniciales;
   }
   try {
-    return JSON.parse(crudo);
+    const datos = JSON.parse(crudo);
+    if (datos && !Array.isArray(datos.proyectos) && Array.isArray(datos.paginas)) {
+      const proyectoMigrado = {
+        id: generarId(),
+        titulo: "Proyecto migrado",
+        slug: "proyecto-migrado",
+        paginas: datos.paginas,
+      };
+      const migrado = {
+        config: { ...configPorDefecto(), ...(datos.config || {}) },
+        proyectos: [proyectoMigrado],
+      };
+      guardarDatos(migrado);
+      return migrado;
+    }
+    return datos;
   } catch (e) {
     console.error("El almacén estaba corrupto, se reinicia.", e);
     const iniciales = datosPorDefecto();
@@ -114,37 +136,52 @@ function importarDatosDesdeJson(texto) {
     throw new Error("El archivo no es un JSON válido.");
   }
 
-  if (!datosImportados || typeof datosImportados !== "object" || !Array.isArray(datosImportados.paginas) || !datosImportados.config || typeof datosImportados.config !== "object") {
+  if (!datosImportados || typeof datosImportados !== "object" || !datosImportados.config || typeof datosImportados.config !== "object") {
     throw new Error("El archivo no tiene el formato esperado.");
   }
 
+  const proyectos = Array.isArray(datosImportados.proyectos)
+    ? datosImportados.proyectos
+    : Array.isArray(datosImportados.paginas)
+    ? [
+        {
+          id: generarId(),
+          titulo: "Proyecto importado",
+          slug: "proyecto-importado",
+          paginas: datosImportados.paginas,
+        },
+      ]
+    : [];
+
   const datosNormalizados = {
     config: {
-      ...datosPorDefecto().config,
+      ...configPorDefecto(),
       ...(datosImportados.config || {}),
     },
-    paginas: (datosImportados.paginas || []).map((pagina) => ({
-      ...pagina,
-      id: pagina.id || generarId(),
-      titulo: pagina.titulo || "Página",
-      slug: generarSlug(pagina.slug || pagina.titulo || "pagina") || "pagina",
-      bloques: Array.isArray(pagina.bloques)
-        ? pagina.bloques.map((bloque) => ({
-            ...bloque,
-            id: bloque.id || generarId(),
-            tipo: bloque.tipo || "parrafo",
-            orden: typeof bloque.orden === "number" ? bloque.orden : 0,
-            datos: bloque.datos || {},
+    proyectos: proyectos.map((proyecto) => ({
+      ...proyecto,
+      id: proyecto.id || generarId(),
+      titulo: proyecto.titulo || "Proyecto",
+      slug: generarSlug(proyecto.slug || proyecto.titulo || "proyecto") || "proyecto",
+      paginas: Array.isArray(proyecto.paginas)
+        ? proyecto.paginas.map((pagina) => ({
+            ...pagina,
+            id: pagina.id || generarId(),
+            titulo: pagina.titulo || "Página",
+            slug: generarSlug(pagina.slug || pagina.titulo || "pagina") || "pagina",
+            bloques: Array.isArray(pagina.bloques)
+              ? pagina.bloques.map((bloque) => ({
+                  ...bloque,
+                  id: bloque.id || generarId(),
+                  tipo: bloque.tipo || "parrafo",
+                  orden: typeof bloque.orden === "number" ? bloque.orden : 0,
+                  datos: bloque.datos || {},
+                }))
+              : [],
           }))
         : [],
     })),
   };
-
-  if (!datosNormalizados.paginas.length) {
-    datosNormalizados.config.paginaInicioSlug = datosPorDefecto().config.paginaInicioSlug;
-  } else if (!datosNormalizados.paginas.some((pagina) => pagina.slug === datosNormalizados.config.paginaInicioSlug)) {
-    datosNormalizados.config.paginaInicioSlug = datosNormalizados.paginas[0].slug;
-  }
 
   guardarDatos(datosNormalizados);
   return datosNormalizados;
@@ -165,36 +202,115 @@ function guardarConfig(config) {
 
 /* ---------- Páginas ---------- */
 
+function listarProyectos() {
+  return obtenerDatos().proyectos;
+}
+
+function obtenerProyectoPorSlug(slug) {
+  return obtenerDatos().proyectos.find((p) => p.slug === slug) || null;
+}
+
+function obtenerProyectoPorId(id) {
+  return obtenerDatos().proyectos.find((p) => p.id === id) || null;
+}
+
+function crearProyecto(titulo) {
+  const datos = obtenerDatos();
+  let slugBase = generarSlug(titulo) || "proyecto";
+  let slug = slugBase;
+  let contador = 2;
+  while (datos.proyectos.some((p) => p.slug === slug)) {
+    slug = `${slugBase}-${contador}`;
+    contador++;
+  }
+  const nuevo = { id: generarId(), titulo, slug, paginas: [] };
+  datos.proyectos.push(nuevo);
+  guardarDatos(datos);
+  return nuevo;
+}
+
+function actualizarProyecto(id, cambios) {
+  const datos = obtenerDatos();
+  const proyecto = datos.proyectos.find((p) => p.id === id);
+  if (!proyecto) return null;
+  if (cambios.titulo !== undefined) proyecto.titulo = cambios.titulo;
+  if (cambios.slug !== undefined) proyecto.slug = generarSlug(cambios.slug) || proyecto.slug;
+  guardarDatos(datos);
+  return proyecto;
+}
+
+function eliminarProyecto(id) {
+  const datos = obtenerDatos();
+  datos.proyectos = datos.proyectos.filter((p) => p.id !== id);
+  guardarDatos(datos);
+}
+
 function listarPaginas() {
-  return obtenerDatos().paginas;
+  return obtenerDatos().proyectos.flatMap((proyecto) => proyecto.paginas || []);
 }
 
 function obtenerPaginaPorSlug(slug) {
-  return obtenerDatos().paginas.find((p) => p.slug === slug) || null;
-}
-
-function obtenerPaginaPorId(id) {
-  return obtenerDatos().paginas.find((p) => p.id === id) || null;
-}
-
-function crearPagina(titulo) {
   const datos = obtenerDatos();
+  for (const proyecto of datos.proyectos) {
+    const pagina = proyecto.paginas.find((p) => p.slug === slug);
+    if (pagina) return pagina;
+  }
+  return null;
+}
+
+function obtenerPaginaPorId(id, datos = obtenerDatos()) {
+  for (const proyecto of datos.proyectos) {
+    const pagina = proyecto.paginas.find((p) => p.id === id);
+    if (pagina) return pagina;
+  }
+  return null;
+}
+
+function buscarPaginaPorId(id, datos = obtenerDatos()) {
+  for (const proyecto of datos.proyectos) {
+    const pagina = proyecto.paginas.find((p) => p.id === id);
+    if (pagina) return { proyecto, pagina };
+  }
+  return { proyecto: null, pagina: null };
+}
+
+function listarPaginasDeProyecto(proyectoId) {
+  const proyecto = obtenerProyectoPorId(proyectoId);
+  return proyecto ? proyecto.paginas : [];
+}
+
+function obtenerPaginaPorSlugEnProyecto(slug, proyectoId) {
+  const proyecto = obtenerProyectoPorId(proyectoId);
+  return proyecto ? proyecto.paginas.find((p) => p.slug === slug) || null : null;
+}
+
+function obtenerPaginaPorIdEnProyecto(id, proyectoId) {
+  const proyecto = obtenerProyectoPorId(proyectoId);
+  return proyecto ? proyecto.paginas.find((p) => p.id === id) || null : null;
+}
+
+function crearPaginaEnProyecto(proyectoId, titulo) {
+  const datos = obtenerDatos();
+  const proyecto = datos.proyectos.find((p) => p.id === proyectoId);
+  if (!proyecto) return null;
   let slugBase = generarSlug(titulo) || "pagina";
   let slug = slugBase;
   let contador = 2;
-  while (datos.paginas.some((p) => p.slug === slug)) {
+  while (proyecto.paginas.some((p) => p.slug === slug)) {
     slug = `${slugBase}-${contador}`;
     contador++;
   }
   const nueva = { id: generarId(), titulo, slug, bloques: [] };
-  datos.paginas.push(nueva);
+  proyecto.paginas.push(nueva);
   guardarDatos(datos);
   return nueva;
 }
 
-function actualizarPagina(id, cambios) {
+function actualizarPaginaEnProyecto(proyectoId, paginaId, cambios) {
   const datos = obtenerDatos();
-  const pagina = datos.paginas.find((p) => p.id === id);
+  const proyecto = datos.proyectos.find((p) => p.id === proyectoId);
+  if (!proyecto) return null;
+  const pagina = proyecto.paginas.find((p) => p.id === paginaId);
   if (!pagina) return null;
   if (cambios.titulo !== undefined) pagina.titulo = cambios.titulo;
   if (cambios.slug !== undefined) pagina.slug = generarSlug(cambios.slug) || pagina.slug;
@@ -202,12 +318,11 @@ function actualizarPagina(id, cambios) {
   return pagina;
 }
 
-function eliminarPagina(id) {
+function eliminarPaginaEnProyecto(proyectoId, paginaId) {
   const datos = obtenerDatos();
-  datos.paginas = datos.paginas.filter((p) => p.id !== id);
-  if (datos.paginas.length && !datos.paginas.some((p) => p.slug === datos.config.paginaInicioSlug)) {
-    datos.config.paginaInicioSlug = datos.paginas[0].slug;
-  }
+  const proyecto = datos.proyectos.find((p) => p.id === proyectoId);
+  if (!proyecto) return;
+  proyecto.paginas = proyecto.paginas.filter((p) => p.id !== paginaId);
   guardarDatos(datos);
 }
 
@@ -215,7 +330,7 @@ function eliminarPagina(id) {
 
 function agregarBloque(paginaId, tipo) {
   const datos = obtenerDatos();
-  const pagina = datos.paginas.find((p) => p.id === paginaId);
+  const { pagina } = buscarPaginaPorId(paginaId, datos);
   if (!pagina) return null;
   const orden = pagina.bloques.length;
   const bloque = { id: generarId(), tipo, orden, datos: datosVaciosParaTipo(tipo) };
@@ -292,7 +407,7 @@ function datosVaciosParaTipo(tipo) {
 
 function actualizarBloque(paginaId, bloqueId, nuevosDatos) {
   const datos = obtenerDatos();
-  const pagina = datos.paginas.find((p) => p.id === paginaId);
+  const { pagina } = buscarPaginaPorId(paginaId, datos);
   if (!pagina) return null;
   const bloque = pagina.bloques.find((b) => b.id === bloqueId);
   if (!bloque) return null;
@@ -303,7 +418,7 @@ function actualizarBloque(paginaId, bloqueId, nuevosDatos) {
 
 function eliminarBloque(paginaId, bloqueId) {
   const datos = obtenerDatos();
-  const pagina = datos.paginas.find((p) => p.id === paginaId);
+  const { pagina } = buscarPaginaPorId(paginaId, datos);
   if (!pagina) return;
   pagina.bloques = pagina.bloques.filter((b) => b.id !== bloqueId);
   pagina.bloques.forEach((b, i) => (b.orden = i));
@@ -312,7 +427,7 @@ function eliminarBloque(paginaId, bloqueId) {
 
 function aplicarPlantillaAPagina(paginaId, plantilla) {
   const datos = obtenerDatos();
-  const pagina = datos.paginas.find((p) => p.id === paginaId);
+  const { pagina } = buscarPaginaPorId(paginaId, datos);
   if (!pagina) return null;
   const bloquesPlantilla = bloquesPorPlantilla(plantilla);
   pagina.bloques = bloquesPlantilla.map((bloque, index) => ({
@@ -327,7 +442,7 @@ function aplicarPlantillaAPagina(paginaId, plantilla) {
 
 function moverBloque(paginaId, bloqueId, direccion) {
   const datos = obtenerDatos();
-  const pagina = datos.paginas.find((p) => p.id === paginaId);
+  const { pagina } = buscarPaginaPorId(paginaId, datos);
   if (!pagina) return;
   pagina.bloques.sort((a, b) => a.orden - b.orden);
   const indice = pagina.bloques.findIndex((b) => b.id === bloqueId);
@@ -342,7 +457,7 @@ function moverBloque(paginaId, bloqueId, direccion) {
 
 function reordenarBloque(paginaId, bloqueId, bloqueReferenciaId) {
   const datos = obtenerDatos();
-  const pagina = datos.paginas.find((p) => p.id === paginaId);
+  const { pagina } = buscarPaginaPorId(paginaId, datos);
   if (!pagina) return null;
 
   pagina.bloques.sort((a, b) => a.orden - b.orden);

@@ -3,30 +3,35 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Mi Sitio</title>
+  <title>AutoPag — Bienvenido</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
-  <header class="encabezado-sitio">
-    <div class="contenedor">
-      <div>
-        <p class="nombre-sitio" id="nombre-sitio">Mi Sitio</p>
-        <p class="slogan-sitio" id="slogan-sitio"></p>
+  <main class="landing-shell">
+    <section class="landing-header">
+      <div class="landing-brand">
+        <span class="landing-pretitle">AutoPag</span>
+        <h1>Bienvenido a AutoPag</h1>
+        <p>Tu espacio para crear y administrar tus sitios autogestionables. Aquí están tus proyectos creados, listos para abrirlos y seguir editando.</p>
       </div>
-      <nav>
-        <ul class="nav-sitio" id="nav-sitio"></ul>
-      </nav>
-    </div>
-  </header>
+      <div class="landing-actions">
+        <button class="boton-primario" id="btn-crear-proyecto">+ Nuevo proyecto</button>
+        <a class="boton-secundario" href="admin.html">Abrir editor</a>
+        <a class="boton-secundario" href="app.html">Ver sitio público</a>
+      </div>
+    </section>
 
-  <main class="pagina" id="contenido-pagina">
-    <!-- Aquí se inyectan los bloques de la página actual -->
+    <section class="landing-proyectos">
+      <div class="landing-proyectos__intro">
+        <p class="dashboard-badge">Tus aplicaciones</p>
+        <h2>Proyectos creados</h2>
+        <p>Cada proyecto representa una aplicación con sus páginas enlazadas. Haz clic en un proyecto para abrirlo en el sitio público o continúa editándolo desde el panel.</p>
+      </div>
+      <div id="landing-grilla" class="dashboard-grilla"></div>
+    </section>
   </main>
 
-  <p class="pie-sitio" id="pie-sitio">Editable desde <a href="admin.html">admin.html</a></p>
-
   <script src="js/store.js"></script>
-  <script src="js/render.js"></script>
-  <script src="js/site.js"></script>
+  <script src="js/landing.js"></script>
 </body>
 </html>

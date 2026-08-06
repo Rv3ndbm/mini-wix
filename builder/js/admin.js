@@ -6,6 +6,7 @@
    funciones renderizar* de este mismo archivo.
    ============================================================ */
 
+let idProyectoSeleccionado = null;
 let idPaginaSeleccionada = null;
 let bloqueArrastradoId = null;
 
@@ -13,72 +14,202 @@ function escaparAtributo(texto) {
   return escaparHtml(texto).replace(/"/g, "&quot;");
 }
 
+function obtenerProyectoSeleccionado() {
+  return idProyectoSeleccionado ? obtenerProyectoPorId(idProyectoSeleccionado) : null;
+}
+
+function obtenerPaginaSeleccionada() {
+  return idPaginaSeleccionada ? obtenerPaginaPorId(idPaginaSeleccionada) : null;
+}
+
+function solicitarTexto(mensaje, valorPorDefecto) {
+  try {
+    const texto = prompt(mensaje, valorPorDefecto);
+    if (texto === null) return null;
+    return texto.trim();
+  } catch (error) {
+    console.warn("prompt no disponible, usando valor por defecto:", error);
+    return valorPorDefecto;
+  }
+}
+
+function actualizarHash() {
+  const proyecto = obtenerProyectoSeleccionado();
+  const pagina = obtenerPaginaSeleccionada();
+  if (!proyecto) {
+    window.location.hash = "";
+    return;
+  }
+  const fragmento = pagina ? `#/${encodeURIComponent(proyecto.slug)}/${encodeURIComponent(pagina.slug)}` : `#/${encodeURIComponent(proyecto.slug)}`;
+  if (window.location.hash !== fragmento) {
+    window.history.replaceState(null, "", fragmento);
+  }
+}
+
 function iniciar() {
-  const paginas = listarPaginas();
-  if (paginas.length) idPaginaSeleccionada = paginas[0].id;
+  const proyectos = listarProyectos();
+  const hash = window.location.hash.replace(/^#\/?/, "");
+  const partes = hash.split("/").filter(Boolean);
+  const proyectoSlug = partes[0] || null;
+  const paginaSlug = partes[1] || null;
+
+  let proyecto = proyectoSlug ? obtenerProyectoPorSlug(proyectoSlug) : null;
+  if (!proyecto && proyectos.length) {
+    proyecto = proyectos[0];
+  }
+
+  if (proyecto) {
+    idProyectoSeleccionado = proyecto.id;
+    if (paginaSlug) {
+      const pagina = obtenerPaginaPorSlugEnProyecto(paginaSlug, proyecto.id);
+      if (pagina) {
+        idPaginaSeleccionada = pagina.id;
+      }
+    }
+    if (!idPaginaSeleccionada) {
+      idPaginaSeleccionada = proyecto.paginas?.[0]?.id || null;
+    }
+  }
+
   renderizarBarraLateral();
   renderizarEditor();
 
+  document.getElementById("btn-nuevo-proyecto").addEventListener("click", crearProyectoNuevo);
   document.getElementById("btn-nueva-pagina").addEventListener("click", crearPaginaNueva);
   document.getElementById("btn-reiniciar").addEventListener("click", () => {
     const seguro = confirm("Esto borra TODAS las páginas y bloques que hayas creado. ¿Continuar?");
     if (!seguro) return;
     reiniciarTodo();
-    idPaginaSeleccionada = listarPaginas()[0]?.id || null;
+    idProyectoSeleccionado = listarProyectos()[0]?.id || null;
+    idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
     renderizarBarraLateral();
     renderizarEditor();
   });
+
+  window.addEventListener("hashchange", () => {
+    const hashActual = window.location.hash.replace(/^#\/?/, "");
+    const partesActuales = hashActual.split("/").filter(Boolean);
+    const proyectoSlugActual = partesActuales[0] || null;
+    const paginaSlugActual = partesActuales[1] || null;
+    const proyecto = proyectoSlugActual ? obtenerProyectoPorSlug(proyectoSlugActual) : null;
+    if (proyecto) {
+      idProyectoSeleccionado = proyecto.id;
+      idPaginaSeleccionada = paginaSlugActual ? obtenerPaginaPorSlugEnProyecto(paginaSlugActual, proyecto.id)?.id : proyecto.paginas?.[0]?.id || null;
+      renderizarBarraLateral();
+      renderizarEditor();
+    }
+  });
 }
 
-/* ---------- Barra lateral: lista de páginas ---------- */
+/* ---------- Barra lateral: proyectos y páginas ---------- */
 
 function renderizarBarraLateral() {
-  const lista = document.getElementById("lista-paginas");
-  const paginas = listarPaginas();
-  lista.innerHTML = paginas
-    .map((p) => {
-      const activo = p.id === idPaginaSeleccionada ? " activo" : "";
+  const listaProyectos = document.getElementById("lista-proyectos");
+  const listaPaginas = document.getElementById("lista-paginas");
+  const proyectos = listarProyectos();
+  const proyecto = obtenerProyectoSeleccionado();
+
+  listaProyectos.innerHTML = proyectos
+    .map((proyectoItem) => {
+      const activo = proyectoItem.id === idProyectoSeleccionado ? " activo" : "";
       return `
-        <li class="item-pagina${activo}" data-id="${p.id}">
-          <span>${escaparHtml(p.titulo)}<br /><span class="slug">/${escaparHtml(p.slug)}</span></span>
+        <li class="item-proyecto${activo}" data-id="${proyectoItem.id}">
+          <span>${escaparHtml(proyectoItem.titulo)}<br /><span class="slug">/${escaparHtml(proyectoItem.slug)}</span></span>
         </li>`;
     })
     .join("");
 
-  lista.querySelectorAll(".item-pagina").forEach((el) => {
+  listaProyectos.querySelectorAll(".item-proyecto").forEach((el) => {
+    el.addEventListener("click", () => {
+      idProyectoSeleccionado = el.dataset.id;
+      idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
+      renderizarBarraLateral();
+      renderizarEditor();
+      actualizarHash();
+    });
+  });
+
+  if (!proyecto) {
+    listaPaginas.innerHTML = `<li class="aviso">Crea un proyecto para poder agregar páginas.</li>`;
+    document.getElementById("btn-nueva-pagina").disabled = true;
+    return;
+  }
+
+  document.getElementById("btn-nueva-pagina").disabled = false;
+
+  listaPaginas.innerHTML = proyecto.paginas
+    .map((pagina) => {
+      const activo = pagina.id === idPaginaSeleccionada ? " activo" : "";
+      return `
+        <li class="item-pagina${activo}" data-id="${pagina.id}">
+          <span>${escaparHtml(pagina.titulo)}<br /><span class="slug">/${escaparHtml(pagina.slug)}</span></span>
+        </li>`;
+    })
+    .join("");
+
+  if (!proyecto.paginas.length) {
+    listaPaginas.innerHTML = `<li class="aviso">Este proyecto no tiene páginas aún. Crea una nueva página.</li>`;
+  }
+
+  listaPaginas.querySelectorAll(".item-pagina").forEach((el) => {
     el.addEventListener("click", () => {
       idPaginaSeleccionada = el.dataset.id;
       renderizarBarraLateral();
       renderizarEditor();
+      actualizarHash();
     });
   });
 }
 
-function crearPaginaNueva() {
-  const titulo = prompt("Título de la nueva página:", "Página nueva");
-  if (!titulo) return;
-  const pagina = crearPagina(titulo);
+function crearProyectoNuevo() {
+  const titulo = solicitarTexto("Título del nuevo proyecto:", "Proyecto nuevo") || "Proyecto nuevo";
+  const proyecto = crearProyecto(titulo);
+  const pagina = crearPaginaEnProyecto(proyecto.id, "Inicio");
+  idProyectoSeleccionado = proyecto.id;
   idPaginaSeleccionada = pagina.id;
   renderizarBarraLateral();
   renderizarEditor();
+  actualizarHash();
+}
+
+function crearPaginaNueva() {
+  const proyecto = obtenerProyectoSeleccionado();
+  if (!proyecto) {
+    alert("Selecciona un proyecto primero.");
+    return;
+  }
+  const titulo = solicitarTexto("Título de la nueva página:", "Página nueva") || "Página nueva";
+  const pagina = crearPaginaEnProyecto(proyecto.id, titulo);
+  idPaginaSeleccionada = pagina.id;
+  renderizarBarraLateral();
+  renderizarEditor();
+  actualizarHash();
 }
 
 /* ---------- Editor principal ---------- */
 
-function actualizarVistaPrevia(slug) {
+function actualizarVistaPrevia() {
   const iframe = document.getElementById("preview-frame");
-  if (iframe) {
-    iframe.src = `index.html#/${encodeURIComponent(slug || "")}`;
-  }
+  const proyecto = obtenerProyectoSeleccionado();
+  const pagina = obtenerPaginaSeleccionada();
+  if (!iframe || !proyecto || !pagina) return;
+  iframe.src = `app.html#/${encodeURIComponent(proyecto.slug)}/${encodeURIComponent(pagina.slug)}`;
 }
 
 function renderizarEditor() {
   const contenedor = document.getElementById("contenido-admin");
-  const pagina = obtenerPaginaPorId(idPaginaSeleccionada);
+  const proyecto = obtenerProyectoSeleccionado();
+  const pagina = obtenerPaginaSeleccionada();
+
+  if (!proyecto) {
+    contenedor.innerHTML = `
+      <div class="aviso">Aún no tienes ningún proyecto. Usa el botón "Nuevo proyecto" para crear uno.</div>`;
+    return;
+  }
 
   if (!pagina) {
     contenedor.innerHTML = `
-      <div class="aviso">Todavía no tienes ninguna página. Crea la primera desde el botón "+ Nueva página".</div>`;
+      <div class="aviso">Selecciona o crea una página para el proyecto "${escaparHtml(proyecto.titulo)}".</div>`;
     return;
   }
 
@@ -89,8 +220,8 @@ function renderizarEditor() {
     <div class="panel-configuracion">
       <div class="encabezado-editor">
         <div style="flex:1; min-width:260px;">
-          <h2 style="margin:0 0 8px;">Configuración del sitio</h2>
-          <p class="etiqueta-tecnica" style="margin:0;">Ajusta el estilo general de tu proyecto</p>
+          <h2 style="margin:0 0 8px;">Proyecto: ${escaparHtml(proyecto.titulo)}</h2>
+          <p class="etiqueta-tecnica" style="margin:0;">Edita la página seleccionada dentro del proyecto.</p>
         </div>
         <button class="boton-primario" id="btn-guardar-config">Guardar tema</button>
       </div>
@@ -153,7 +284,7 @@ function renderizarEditor() {
         <strong>Vista previa</strong>
         <span>Tu sitio se actualiza al guardar</span>
       </div>
-      <iframe id="preview-frame" src="index.html#/${escaparAtributo(pagina.slug)}"></iframe>
+      <iframe id="preview-frame" src="app.html#/${escaparAtributo(proyecto.slug)}/${escaparAtributo(pagina.slug)}"></iframe>
     </div>
 
     <div class="encabezado-editor">
@@ -170,12 +301,14 @@ function renderizarEditor() {
         </div>
       </div>
       <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-        <a class="enlace-previa" target="_blank" href="index.html#/${escaparAtributo(pagina.slug)}">Ver página →</a>
+        <a class="enlace-previa" target="_blank" href="app.html#/${escaparAtributo(proyecto.slug)}">Ver proyecto →</a>
+        <a class="enlace-previa" target="_blank" href="app.html#/${escaparAtributo(proyecto.slug)}/${escaparAtributo(pagina.slug)}">Ver página →</a>
         <button class="boton-secundario" id="btn-exportar">⬇ Exportar JSON</button>
         <button class="boton-secundario" id="btn-importar">⬆ Importar JSON</button>
         <input id="input-importar" type="file" accept="application/json" hidden />
         <button class="boton-secundario" id="btn-guardar-pagina">Guardar cambios</button>
         <button class="boton-peligro" id="btn-eliminar-pagina">Eliminar página</button>
+        <button class="boton-peligro" id="btn-eliminar-proyecto">Eliminar proyecto</button>
       </div>
     </div>
 
@@ -230,25 +363,38 @@ function renderizarEditor() {
   document.getElementById("btn-aplicar-plantilla").addEventListener("click", () => {
     const plantilla = document.getElementById("select-plantilla").value;
     aplicarPlantillaAPagina(pagina.id, plantilla);
-    actualizarVistaPrevia(pagina.slug);
+    actualizarVistaPrevia();
     renderizarEditor();
   });
 
   document.getElementById("btn-guardar-pagina").addEventListener("click", () => {
     const nuevoTitulo = document.getElementById("campo-titulo").value.trim() || pagina.titulo;
     const nuevoSlug = document.getElementById("campo-slug").value.trim() || pagina.slug;
-    actualizarPagina(pagina.id, { titulo: nuevoTitulo, slug: nuevoSlug });
+    actualizarPaginaEnProyecto(proyecto.id, pagina.id, { titulo: nuevoTitulo, slug: nuevoSlug });
     renderizarBarraLateral();
     renderizarEditor();
+    actualizarHash();
   });
 
   document.getElementById("btn-eliminar-pagina").addEventListener("click", () => {
     const seguro = confirm(`¿Eliminar la página "${pagina.titulo}"? Esta acción no se puede deshacer.`);
     if (!seguro) return;
-    eliminarPagina(pagina.id);
-    idPaginaSeleccionada = listarPaginas()[0]?.id || null;
+    eliminarPaginaEnProyecto(proyecto.id, pagina.id);
+    idPaginaSeleccionada = listarPaginasDeProyecto(proyecto.id)[0]?.id || null;
     renderizarBarraLateral();
     renderizarEditor();
+    actualizarHash();
+  });
+
+  document.getElementById("btn-eliminar-proyecto").addEventListener("click", () => {
+    const seguro = confirm(`¿Eliminar el proyecto "${proyecto.titulo}" y todas sus páginas? Esta acción no se puede deshacer.`);
+    if (!seguro) return;
+    eliminarProyecto(proyecto.id);
+    idProyectoSeleccionado = listarProyectos()[0]?.id || null;
+    idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
+    renderizarBarraLateral();
+    renderizarEditor();
+    actualizarHash();
   });
 
   document.getElementById("btn-exportar").addEventListener("click", () => {
@@ -275,7 +421,8 @@ function renderizarEditor() {
     lector.onload = () => {
       try {
         importarDatosDesdeJson(lector.result);
-        idPaginaSeleccionada = listarPaginas()[0]?.id || null;
+        idProyectoSeleccionado = listarProyectos()[0]?.id || null;
+        idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
         renderizarBarraLateral();
         renderizarEditor();
         alert("Sitio importado correctamente.");
@@ -292,11 +439,21 @@ function renderizarEditor() {
     lector.readAsText(archivo);
   });
 
-  actualizarVistaPrevia(pagina.slug);
+  actualizarVistaPrevia();
 
   contenedor.querySelectorAll(".chip-bloque").forEach((chip) => {
     chip.addEventListener("click", () => {
-      agregarBloque(pagina.id, chip.dataset.tipo);
+      const paginaLocal = obtenerPaginaSeleccionada();
+      if (!paginaLocal) {
+        alert("Selecciona un proyecto y una página antes de agregar bloques.");
+        return;
+      }
+      const resultado = agregarBloque(paginaLocal.id, chip.dataset.tipo);
+      if (!resultado) {
+        console.error("No se pudo agregar el bloque. Página no encontrada.");
+        alert("Error al agregar bloque. Intenta recargar la página.");
+        return;
+      }
       renderizarEditor();
     });
   });
@@ -637,8 +794,19 @@ function enlazarEventosDeBloques(paginaId) {
         });
 
         Promise.all(archivos.map(procesarArchivo)).then((resultados) => {
-          const paginaActual = obtenerPaginaPorId(paginaId);
+          const res = buscarPaginaPorId(paginaId);
+          const paginaActual = res && res.pagina;
+          if (!paginaActual) {
+            console.error("Página no encontrada al procesar upload", paginaId);
+            alert("No se encontró la página. Recarga el editor e intenta otra vez.");
+            return;
+          }
           const bloque = paginaActual.bloques.find((b) => b.id === bloqueId);
+          if (!bloque) {
+            console.error("Bloque no encontrado al procesar upload", bloqueId);
+            alert("No se encontró el bloque. Recarga el editor e intenta otra vez.");
+            return;
+          }
           if (input.dataset.upload === "imagen") {
             actualizarBloque(paginaId, bloqueId, { url: resultados[0] });
           } else if (input.dataset.upload === "galeria") {
@@ -653,8 +821,11 @@ function enlazarEventosDeBloques(paginaId) {
     /* Campos especiales del bloque tipo "lista" */
     const contenedorLista = tarjeta.querySelector("[data-lista-items]");
     if (contenedorLista) {
-      const pagina = obtenerPaginaPorId(paginaId);
+      const res = buscarPaginaPorId(paginaId);
+      const pagina = res && res.pagina;
+      if (!pagina) return;
       const bloque = pagina.bloques.find((b) => b.id === bloqueId);
+      if (!bloque) return;
 
       contenedorLista.querySelectorAll("input[data-item-indice]").forEach((input) => {
         input.addEventListener("change", () => {

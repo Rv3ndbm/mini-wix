@@ -56,17 +56,20 @@ builder/
    pantalla (`renderizarEditor()`), así siempre se ve el estado real de los
    datos.
 
-## Ideas para extender la tarea (opcional)
+## Funcionalidades ya incluidas
 
-- Agregar más tipos de bloque (video embebido, galería, formulario de
-  contacto) siguiendo el mismo patrón: un caso nuevo en `render.js` +
-  `admin.js`.
+- Bloques más ricos: video embebido, galería, formulario de contacto,
+  hero, cards, testimonios, FAQ, secciones y columnas.
 - Exportar/importar el JSON de `localStorage` como archivo, para poder
   compartir un sitio entre computadores.
-- Cambiar `localStorage` por un backend real (por ejemplo ASP.NET Core +
-  SQLite) si la tarea pide persistencia en servidor en vez de en el
-  navegador — la ventaja de este diseño es que solo tendrías que reemplazar
-  `store.js`, el resto del código no cambia.
+- Vista previa en vivo, personalización visual global (colores, tipografías,
+  ancho del contenido) y carga de imágenes locales desde el panel.
+- Plantillas de página, reordenado de bloques por arrastre y navegación
+  más completa para el sitio público.
+- Futuro paso natural: cambiar `localStorage` por un backend real (por
+  ejemplo ASP.NET Core + SQLite) si la tarea pide persistencia en servidor
+  en vez de en el navegador; la ventaja de este diseño es que solo
+  tendrías que reemplazar `store.js`, el resto del código no cambia.
 
 ## Reiniciar los datos
 
