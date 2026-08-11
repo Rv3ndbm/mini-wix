@@ -11,6 +11,7 @@
   }
 
   function prepararRevelados() {
+    if (!observador && !movimientoReducido) return;
     const elementos = document.querySelectorAll(
       ".landing-header, .landing-proyectos__intro, .dashboard-hero, .dashboard-tarjeta, .bloque-wrapper, .panel-configuracion, .preview-panel, .encabezado-editor, .tarjeta-bloque, .aviso"
     );

@@ -34,6 +34,7 @@ function crearTarjetasProyectos() {
         </article>`;
     })
     .join("\n");
+  if (typeof inicializarAnimaciones === "function") inicializarAnimaciones();
 }
 
 function crearProyectoDesdeLanding() {

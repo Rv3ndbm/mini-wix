@@ -125,6 +125,8 @@ function pintarPaginaActual() {
   const contenido = ruta.proyectoSlug === null ? renderizarIndiceProyectos() : renderizarPagina(obtenerPaginaDeRuta(ruta));
   document.getElementById("contenido-pagina").innerHTML = contenido;
   pintarEncabezado();
+  if (typeof inicializarAnimaciones === "function") inicializarAnimaciones();
+  requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" }));
 }
 
 window.addEventListener("hashchange", pintarPaginaActual);
