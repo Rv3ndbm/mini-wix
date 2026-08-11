@@ -10,43 +10,12 @@ let idProyectoSeleccionado = null;
 let idPaginaSeleccionada = null;
 let bloqueArrastradoId = null;
 
-function escaparAtributo(texto) {
-  return escaparHtml(texto).replace(/"/g, "&quot;");
-}
-
 function obtenerProyectoSeleccionado() {
   return idProyectoSeleccionado ? obtenerProyectoPorId(idProyectoSeleccionado) : null;
 }
 
 function obtenerPaginaSeleccionada() {
   return idPaginaSeleccionada ? obtenerPaginaPorId(idPaginaSeleccionada) : null;
-}
-
-function solicitarTexto(mensaje, valorPorDefecto, opciones) {
-  const opts = opciones || {};
-  const minLong = typeof opts.minLong === "number" ? opts.minLong : 2;
-  const maxIntentos = typeof opts.maxIntentos === "number" ? opts.maxIntentos : 3;
-  try {
-    let intentos = 0;
-    while (intentos < maxIntentos) {
-      const texto = prompt(mensaje, valorPorDefecto);
-      if (texto === null) return null;
-      const limpio = texto.trim();
-      if (limpio.length === 0) {
-        alert("❌ El valor no puede estar vacío. Inténtalo de nuevo.");
-      } else if (limpio.length < minLong) {
-        alert(`❌ El valor es demasiado corto. Mínimo ${minLong} caracteres.`);
-      } else {
-        return limpio;
-      }
-      intentos++;
-    }
-    alert("Demasiados intentos. Operación cancelada.");
-    return null;
-  } catch (error) {
-    console.warn("prompt no disponible, usando valor por defecto:", error);
-    return valorPorDefecto;
-  }
 }
 
 function actualizarHash() {
@@ -176,7 +145,12 @@ function iniciar() {
   document.getElementById("btn-reiniciar").addEventListener("click", () => {
     const seguro = confirm("⚠️ Esto borra TODAS las páginas y bloques que hayas creado. Antes se creará un backup automático.\n\n¿Continuar?");
     if (!seguro) return;
-    reiniciarTodo();
+    try {
+      reiniciarTodo();
+    } catch (error) {
+      alert(`No se pudo reiniciar: ${error.message || "error desconocido"}`);
+      return;
+    }
     idProyectoSeleccionado = listarProyectos()[0]?.id || null;
     idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
     renderizarBarraLateral();
@@ -311,16 +285,30 @@ function renderizarEditor() {
   }
 
   const bloquesOrdenados = [...pagina.bloques].sort((a, b) => a.orden - b.orden);
-  const config = obtenerConfig();
+  const config = obtenerConfig(proyecto.id);
 
   contenedor.innerHTML = `
     <div class="panel-configuracion">
       <div class="encabezado-editor">
         <div style="flex:1; min-width:260px;">
           <h2 style="margin:0 0 8px;">Proyecto: ${escaparHtml(proyecto.titulo)}</h2>
-          <p class="etiqueta-tecnica" style="margin:0;">Edita la página seleccionada dentro del proyecto.</p>
+          <p class="etiqueta-tecnica" style="margin:0;">Tema y ajustes exclusivos de este proyecto.</p>
         </div>
         <button class="boton-primario" id="btn-guardar-config">Guardar tema</button>
+      </div>
+
+      <div class="fila-campos">
+        <div class="campo">
+          <label for="campo-titulo-proyecto">Nombre del proyecto</label>
+          <input id="campo-titulo-proyecto" type="text" value="${escaparAtributo(proyecto.titulo)}" />
+        </div>
+        <div class="campo">
+          <label for="campo-slug-proyecto">Dirección del proyecto</label>
+          <input id="campo-slug-proyecto" type="text" value="${escaparAtributo(proyecto.slug)}" />
+        </div>
+        <div class="campo" style="align-self:end; min-width:180px;">
+          <button class="boton-secundario" id="btn-guardar-proyecto">Guardar proyecto</button>
+        </div>
       </div>
 
       <div class="fila-campos">
@@ -471,7 +459,7 @@ function renderizarEditor() {
   `;
 
   document.getElementById("btn-guardar-config").addEventListener("click", () => {
-    guardarConfig({
+    guardarConfig(proyecto.id, {
       nombreSitio: document.getElementById("campo-nombre-sitio").value.trim() || config.nombreSitio,
       sloganSitio: document.getElementById("campo-slogan-sitio").value.trim() || config.sloganSitio,
       paginaInicioSlug: document.getElementById("campo-pagina-inicio").value.trim() || config.paginaInicioSlug,
@@ -489,12 +477,21 @@ function renderizarEditor() {
     alert("✅ Configuración guardada correctamente.");
   });
 
+  document.getElementById("btn-guardar-proyecto").addEventListener("click", () => {
+    const titulo = document.getElementById("campo-titulo-proyecto").value.trim() || proyecto.titulo;
+    const slug = document.getElementById("campo-slug-proyecto").value.trim() || proyecto.slug;
+    actualizarProyecto(proyecto.id, { titulo, slug });
+    renderizarBarraLateral();
+    renderizarEditor();
+    actualizarHash();
+  });
+
   const btnBackups = document.getElementById("btn-gestionar-backups");
   if (btnBackups) {
     btnBackups.addEventListener("click", () => {
       const backups = listarBackups ? listarBackups() : [];
       if (!backups.length) {
-        alert("Aún no hay backups automáticos creados. Se crearán uno nuevo en la próxima modificación.");
+        alert("Aún no hay backups. Se crea una copia antes de importar, restaurar o reiniciar datos.");
         return;
       }
       const lista = backups.map((b, i) =>
@@ -837,7 +834,7 @@ function camposEditablesDeBloque(bloque) {
       return `${estilos}
         <div class="campo">
           <label>URLs de imágenes (una por línea)</label>
-          <textarea data-campo="items" placeholder="https://...&#10;https://...">${(Array.isArray(d.items) ? d.items : []).join("\n")}</textarea>
+          <textarea data-campo="items" placeholder="https://...&#10;https://...">${textoParaTextarea((Array.isArray(d.items) ? d.items : []).join("\n"))}</textarea>
         </div>
         <div class="campo">
           <label>Subir imágenes locales</label>
@@ -909,31 +906,31 @@ function camposEditablesDeBloque(bloque) {
       return `${estilos}
         <div class="campo">
           <label>Cards (una por línea, formato: Título | Descripción | Enlace)</label>
-          <textarea data-campo="items" placeholder="Servicio A | Descripción breve | #&#10;Servicio B | Otra descripción | #">${(Array.isArray(d.items) ? d.items : []).map((item) => typeof item === "string" ? item : `${item.titulo || ""} | ${item.descripcion || ""} | ${item.enlace || ""}`).join("\n")}</textarea>
+          <textarea data-campo="items" placeholder="Servicio A | Descripción breve | #&#10;Servicio B | Otra descripción | #">${textoParaTextarea((Array.isArray(d.items) ? d.items : []).map((item) => typeof item === "string" ? item : `${item.titulo || ""} | ${item.descripcion || ""} | ${item.enlace || ""}`).join("\n"))}</textarea>
         </div>`;
     case "testimonios":
       return `${estilos}
         <div class="campo">
           <label>Testimonios (una por línea, formato: Texto | Autor)</label>
-          <textarea data-campo="items" placeholder="Excelente servicio | María&#10;Muy recomendable | Juan">${(Array.isArray(d.items) ? d.items : []).map((item) => typeof item === "string" ? item : `${item.texto || ""} | ${item.autor || ""}`).join("\n")}</textarea>
+          <textarea data-campo="items" placeholder="Excelente servicio | María&#10;Muy recomendable | Juan">${textoParaTextarea((Array.isArray(d.items) ? d.items : []).map((item) => typeof item === "string" ? item : `${item.texto || ""} | ${item.autor || ""}`).join("\n"))}</textarea>
         </div>`;
     case "faq":
       return `${estilos}
         <div class="campo">
           <label>FAQ (una por línea, formato: Pregunta | Respuesta)</label>
-          <textarea data-campo="items" placeholder="¿Quiénes sois? | Somos un equipo de desarrollo&#10;¿Atendéis a empresas? | Sí, también trabajamos con empresas">${(Array.isArray(d.items) ? d.items : []).map((item) => typeof item === "string" ? item : `${item.pregunta || ""} | ${item.respuesta || ""}`).join("\n")}</textarea>
+          <textarea data-campo="items" placeholder="¿Quiénes sois? | Somos un equipo de desarrollo&#10;¿Atendéis a empresas? | Sí, también trabajamos con empresas">${textoParaTextarea((Array.isArray(d.items) ? d.items : []).map((item) => typeof item === "string" ? item : `${item.pregunta || ""} | ${item.respuesta || ""}`).join("\n"))}</textarea>
         </div>`;
     case "seccion":
       return `${estilos}
         <div class="campo">
           <label>Contenido de la sección (uno por línea)</label>
-          <textarea data-campo="contenido" placeholder="Texto de ejemplo&#10;Otro bloque en esta sección">${(Array.isArray(d.contenido) ? d.contenido : []).join("\n")}</textarea>
+          <textarea data-campo="contenido" placeholder="Texto de ejemplo&#10;Otro bloque en esta sección">${textoParaTextarea((Array.isArray(d.contenido) ? d.contenido : []).join("\n"))}</textarea>
         </div>`;
     case "columnas":
       return `${estilos}
         <div class="campo">
           <label>Columnas (una por línea)</label>
-          <textarea data-campo="columnas" placeholder="Columna 1&#10;Columna 2">${(Array.isArray(d.columnas) ? d.columnas : []).join("\n")}</textarea>
+          <textarea data-campo="columnas" placeholder="Columna 1&#10;Columna 2">${textoParaTextarea((Array.isArray(d.columnas) ? d.columnas : []).join("\n"))}</textarea>
         </div>`;
     default:
       return "";
@@ -1033,13 +1030,7 @@ function enlazarEventosDeBloques(paginaId) {
         const archivos = Array.from(input.files || []);
         if (!archivos.length) return;
 
-        const procesarArchivo = (archivo) => new Promise((resolver) => {
-          const lector = new FileReader();
-          lector.onload = () => resolver(lector.result);
-          lector.readAsDataURL(archivo);
-        });
-
-        Promise.all(archivos.map(procesarArchivo)).then((resultados) => {
+        Promise.all(archivos.map((archivo) => leerArchivoComoDataUrl(archivo, MAX_BYTES_IMAGEN))).then((resultados) => {
           const res = buscarPaginaPorId(paginaId);
           const paginaActual = res && res.pagina;
           if (!paginaActual) {
@@ -1060,7 +1051,7 @@ function enlazarEventosDeBloques(paginaId) {
             actualizarBloque(paginaId, bloqueId, { items });
           }
           renderizarEditor();
-        });
+        }).catch((error) => alert(error.message || "No se pudo cargar la imagen."));
       });
     });
 

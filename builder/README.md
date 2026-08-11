@@ -1,79 +1,74 @@
-# Mini Wix — sitio web autogestionable
+# AutoPag — creador de sitios autogestionables
 
-Un sitio web que se administra a sí mismo: desde `admin.html` puedes crear
-páginas nuevas y llenarlas con bloques (títulos, párrafos, imágenes, botones,
-listas, separadores) sin escribir código. `index.html` lee esos datos y
-genera las páginas automáticamente.
+AutoPag es un constructor de sitios estático hecho con HTML, CSS y JavaScript puro. Permite crear varios proyectos, diseñar sus páginas con bloques y publicar una vista navegable sin escribir HTML para cada página.
 
-## Cómo abrirlo
+> Está pensado para ejecutarse localmente o como demostración. No incluye servidor, usuarios reales ni almacenamiento compartido.
 
-**No lo abras haciendo doble clic en el archivo.** Algunos navegadores
-(sobre todo Firefox) bloquean el guardado de datos cuando el archivo se abre
-directo desde el disco (`file://`). Usa un servidor local, es una sola línea:
+## Ejecutarlo
+
+No abras los archivos mediante `file://`: algunos navegadores restringen `localStorage` en ese modo. Inicia un servidor dentro de esta carpeta:
 
 ```bash
 cd builder
-python3 -m http.server 8000
+python -m http.server 8000
 ```
 
-Y abre en el navegador: `http://localhost:8000/index.html` (sitio público) y
-`http://localhost:8000/admin.html` (panel de administración).
+Abre después:
 
-Si tienes VS Code, la extensión "Live Server" también funciona: clic derecho
-sobre `index.html` → "Open with Live Server".
+- `http://localhost:8000/index.html` — inicio y lista de proyectos.
+- `http://localhost:8000/admin.html` — panel de edición.
+- `http://localhost:8000/app.html` — vista pública de los proyectos.
 
-## Estructura del proyecto
+También funciona con Live Server de VS Code.
 
+Para ejecutar las pruebas de almacenamiento y sanitización:
+
+```bash
+node tests/store.test.js
 ```
+
+## Uso básico
+
+1. Crea un proyecto desde la portada o el panel.
+2. Configura su nombre, slug, colores, tipografías, pie de página y página inicial.
+3. Crea páginas y añade bloques: títulos, texto, imágenes, botones, listas, video, galería, formulario, hero, cards, testimonios, FAQ, secciones y columnas.
+4. Guarda los cambios y abre la vista previa o el enlace público.
+
+Las rutas públicas usan hashes, por ejemplo: `app.html#/mi-proyecto/inicio`. No se necesita configurar rutas en el servidor.
+
+## Estructura
+
+```text
 builder/
-├── index.html        → el sitio público (lo que ve un visitante)
-├── admin.html         → el panel donde tú administras el contenido
-├── css/style.css       → todos los estilos
+├── index.html            # Portada y proyectos
+├── admin.html            # Editor
+├── app.html              # Sitio público
+├── css/style.css         # Estilos y diseño responsive
 └── js/
-    ├── store.js        → guarda y lee los datos (usa localStorage del navegador)
-    ├── render.js        → convierte un bloque de datos en HTML
-    ├── site.js          → arma el sitio público (navegación con #)
-    └── admin.js         → toda la lógica del panel de administración
+    ├── store.js          # Datos, migraciones, validación y backups
+    ├── render.js         # Renderizador seguro de bloques
+    ├── site.js           # Rutas y navegación pública
+    ├── admin-utils.js    # Utilidades reutilizables del editor
+    ├── admin.js          # Interfaz y eventos del editor
+    └── landing.js        # Inicio/lista de proyectos
 ```
 
-## Cómo funciona (para explicarlo en la sustentación)
+## Datos y respaldo
 
-1. **Los datos son el sitio.** No hay HTML fijo para cada página. Cada
-   página es un objeto `{ titulo, slug, bloques: [...] }` guardado como JSON
-   en `localStorage`. `store.js` es la única parte del código que lee y
-   escribe ese JSON.
-2. **Un renderizador, no una plantilla por página.** `render.js` tiene una
-   sola función (`renderizarBloque`) que sabe convertir cualquier bloque en
-   HTML según su `tipo`. Por eso agregar una página nueva no requiere
-   escribir código nuevo: solo se guarda un registro más.
-3. **Rutas con `#`.** `index.html#/contacto` le dice a `site.js` qué `slug`
-   buscar en los datos guardados y lo dibuja dentro de `#contenido-pagina`.
-   No hace falta un servidor con enrutamiento porque todo pasa en el
-   navegador.
-4. **El panel de administración es un formulario que llama a `store.js`.**
-   Cada botón (agregar bloque, subir, bajar, eliminar, guardar) termina
-   llamando a una función de `store.js` y luego volviendo a dibujar la
-   pantalla (`renderizarEditor()`), así siempre se ve el estado real de los
-   datos.
+Los datos se guardan en `localStorage` del navegador. Cada proyecto tiene su propia configuración visual y sus propias páginas. Los datos antiguos se migran automáticamente al abrir la aplicación.
 
-## Funcionalidades ya incluidas
+- Exporta regularmente el sitio como JSON desde el editor.
+- Importar, restaurar o reiniciar crea una copia de seguridad local antes de reemplazar datos.
+- Se conservan hasta dos copias locales para no agotar el espacio del navegador.
+- Las imágenes locales se limitan a 700 KB por archivo y el sitio completo a 1.5 MB. Para proyectos con muchas imágenes usa URLs externas o migra a almacenamiento de servidor.
 
-- Bloques más ricos: video embebido, galería, formulario de contacto,
-  hero, cards, testimonios, FAQ, secciones y columnas.
-- Exportar/importar el JSON de `localStorage` como archivo, para poder
-  compartir un sitio entre computadores.
-- Vista previa en vivo, personalización visual global (colores, tipografías,
-  ancho del contenido) y carga de imágenes locales desde el panel.
-- Plantillas de página, reordenado de bloques por arrastre y navegación
-  más completa para el sitio público.
-- Futuro paso natural: cambiar `localStorage` por un backend real (por
-  ejemplo ASP.NET Core + SQLite) si la tarea pide persistencia en servidor
-  en vez de en el navegador; la ventaja de este diseño es que solo
-  tendrías que reemplazar `store.js`, el resto del código no cambia.
+## Seguridad y límites
 
-## Reiniciar los datos
+- Los textos, URLs, colores y fuentes se validan antes de guardarse o renderizarse.
+- Las URLs peligrosas, los `data:` que no sean imágenes permitidas y estilos no válidos se bloquean.
+- La opción de contraseña del panel es únicamente un bloqueo local de conveniencia: no protege datos en un sitio publicado. Para producción se requiere autenticación en servidor.
+- El formulario de contacto usa `mailto:` o un endpoint HTTP configurado por quien administra el proyecto; AutoPag no almacena mensajes.
 
-Si algo se daña mientras pruebas, el botón "↺ Reiniciar todo" en el panel
-de administración borra todo y vuelve al estado inicial. También puedes
-borrarlo manualmente desde la consola del navegador:
-`localStorage.removeItem("miniwix_datos_v1")`.
+## Siguiente paso para producción
+
+Sustituye `store.js` por una API con autenticación, base de datos y almacenamiento de archivos. El renderizador y la interfaz pueden mantenerse, pero los datos deben dejar de depender de `localStorage` si habrá varios usuarios, varios dispositivos o contenido importante.

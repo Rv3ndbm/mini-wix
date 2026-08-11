@@ -9,7 +9,9 @@
 
 const CLAVE_ALMACEN = "miniwix_datos_v1";
 const CLAVE_BACKUP_PREFIX = "miniwix_backup_v1_";
-const MAX_BACKUPS = 5;
+const MAX_BACKUPS = 2;
+const MAX_BYTES_DATOS = 1_500_000;
+const MAX_BYTES_IMAGEN = 700 * 1024;
 
 const ESQUEMAS_URL_PERMITIDOS = [
   "http://",
@@ -30,7 +32,7 @@ function esUrlSegura(url) {
   if (lower.startsWith("javascript:") || lower.startsWith("vbscript:") || lower.startsWith("data:text/html")) {
     return false;
   }
-  if (lower.startsWith("data:") && !lower.startsWith("data:image/")) {
+  if (lower.startsWith("data:") && !/^data:image\/(png|jpeg|gif|webp|avif);base64,[a-z0-9+/=\s]+$/i.test(str)) {
     return false;
   }
   if (/^[a-z]+:/i.test(str)) {
@@ -44,6 +46,20 @@ function sanitizarUrl(url) {
   return url;
 }
 
+function sanitizarColor(color) {
+  const valor = String(color || "").trim();
+  return /^#[0-9a-f]{6}$/i.test(valor) || /^#[0-9a-f]{3}$/i.test(valor) ? valor : "";
+}
+
+function sanitizarFuente(fuente, alternativa) {
+  const valor = String(fuente || "").trim();
+  return /^[a-z0-9 ,.'"-]{1,80}$/i.test(valor) ? valor : alternativa;
+}
+
+function limitarTexto(valor, maximo = 5000) {
+  return typeof valor === "string" ? valor.slice(0, maximo) : valor;
+}
+
 function sanitizarBloqueRecursivo(bloque) {
   const b = { ...bloque };
   b.datos = b.datos ? { ...b.datos } : {};
@@ -51,6 +67,9 @@ function sanitizarBloqueRecursivo(bloque) {
   const camposUrl = ["url", "enlace", "botonEnlace", "imagen"];
   camposUrl.forEach((campo) => {
     if (typeof d[campo] === "string") d[campo] = sanitizarUrl(d[campo]);
+  });
+  ["colorTexto", "colorFondo", "colorBorde"].forEach((campo) => {
+    if (d[campo] !== undefined) d[campo] = sanitizarColor(d[campo]);
   });
   if (Array.isArray(d.items)) {
     d.items = d.items.map((item) => {
@@ -87,6 +106,26 @@ function configPorDefecto() {
   };
 }
 
+function normalizarConfig(config) {
+  const base = configPorDefecto();
+  const entrada = config && typeof config === "object" ? config : {};
+  const ancho = Number(entrada.anchoContenido);
+  return {
+    nombreSitio: limitarTexto(entrada.nombreSitio || base.nombreSitio, 100),
+    sloganSitio: limitarTexto(entrada.sloganSitio || base.sloganSitio, 180),
+    paginaInicioSlug: generarSlug(entrada.paginaInicioSlug || base.paginaInicioSlug) || base.paginaInicioSlug,
+    colorPrincipal: sanitizarColor(entrada.colorPrincipal) || base.colorPrincipal,
+    colorAcento: sanitizarColor(entrada.colorAcento) || base.colorAcento,
+    colorFondo: sanitizarColor(entrada.colorFondo) || base.colorFondo,
+    colorTexto: sanitizarColor(entrada.colorTexto) || base.colorTexto,
+    fuenteCabecera: sanitizarFuente(entrada.fuenteCabecera, base.fuenteCabecera),
+    fuenteCuerpo: sanitizarFuente(entrada.fuenteCuerpo, base.fuenteCuerpo),
+    anchoContenido: String(Number.isFinite(ancho) ? Math.min(1200, Math.max(500, ancho)) : Number(base.anchoContenido)),
+    footerTexto: limitarTexto(entrada.footerTexto || base.footerTexto, 160),
+    footerEnlace: sanitizarUrl(limitarTexto(entrada.footerEnlace || base.footerEnlace, 500)),
+  };
+}
+
 function datosPorDefecto() {
   const idInicio = generarId();
   const idBienvenida = generarId();
@@ -97,6 +136,7 @@ function datosPorDefecto() {
         id: generarId(),
         titulo: "Proyecto inicial",
         slug: "proyecto-inicial",
+        config: configPorDefecto(),
         paginas: [
           {
             id: idInicio,
@@ -126,6 +166,34 @@ function datosPorDefecto() {
   };
 }
 
+function normalizarProyecto(proyecto, configHereda) {
+  const origen = proyecto && typeof proyecto === "object" ? proyecto : {};
+  const paginas = Array.isArray(origen.paginas) ? origen.paginas : [];
+  return {
+    id: origen.id || generarId(),
+    titulo: limitarTexto(origen.titulo || "Proyecto", 100),
+    slug: generarSlug(origen.slug || origen.titulo || "proyecto") || "proyecto",
+    config: normalizarConfig({ ...(configHereda || {}), ...(origen.config || {}) }),
+    paginas: paginas.map((pagina) => ({
+      ...pagina,
+      id: pagina.id || generarId(),
+      titulo: limitarTexto(pagina.titulo || "Página", 100),
+      slug: generarSlug(pagina.slug || pagina.titulo || "pagina") || "pagina",
+      bloques: Array.isArray(pagina.bloques) ? pagina.bloques.map(sanitizarBloqueRecursivo) : [],
+    })),
+  };
+}
+
+function normalizarDatos(datos) {
+  if (!datos || typeof datos !== "object") throw new Error("Los datos guardados no son válidos.");
+  const configAnterior = normalizarConfig(datos.config);
+  if (Array.isArray(datos.paginas) && !Array.isArray(datos.proyectos)) {
+    return { version: 2, proyectos: [normalizarProyecto({ titulo: "Proyecto migrado", slug: "proyecto-migrado", paginas: datos.paginas }, configAnterior)] };
+  }
+  if (!Array.isArray(datos.proyectos)) throw new Error("Falta la lista de proyectos.");
+  return { version: 2, proyectos: datos.proyectos.map((proyecto) => normalizarProyecto(proyecto, configAnterior)) };
+}
+
 function generarId() {
   return "id_" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
@@ -146,30 +214,17 @@ function generarSlug(texto) {
 function obtenerDatos() {
   const crudo = localStorage.getItem(CLAVE_ALMACEN);
   if (!crudo) {
-    const iniciales = datosPorDefecto();
+    const iniciales = normalizarDatos(datosPorDefecto());
     guardarDatos(iniciales);
     return iniciales;
   }
   try {
-    const datos = JSON.parse(crudo);
-    if (datos && !Array.isArray(datos.proyectos) && Array.isArray(datos.paginas)) {
-      const proyectoMigrado = {
-        id: generarId(),
-        titulo: "Proyecto migrado",
-        slug: "proyecto-migrado",
-        paginas: datos.paginas,
-      };
-      const migrado = {
-        config: { ...configPorDefecto(), ...(datos.config || {}) },
-        proyectos: [proyectoMigrado],
-      };
-      guardarDatos(migrado);
-      return migrado;
-    }
+    const datos = normalizarDatos(JSON.parse(crudo));
+    if (crudo !== JSON.stringify(datos)) guardarDatos(datos);
     return datos;
   } catch (e) {
     console.error("El almacén estaba corrupto, se reinicia.", e);
-    const iniciales = datosPorDefecto();
+    const iniciales = normalizarDatos(datosPorDefecto());
     guardarDatos(iniciales);
     return iniciales;
   }
@@ -178,19 +233,19 @@ function obtenerDatos() {
 function hacerBackup() {
   try {
     const actual = localStorage.getItem(CLAVE_ALMACEN);
-    if (!actual) return;
+    if (!actual) return true;
+    if (actual.length > MAX_BYTES_DATOS) {
+      throw new Error("Los datos son demasiado grandes para crear una copia local segura.");
+    }
+    const existentes = Object.keys(localStorage).filter((k) => k.startsWith(CLAVE_BACKUP_PREFIX)).sort();
+    while (existentes.length >= MAX_BACKUPS) localStorage.removeItem(existentes.shift());
     const marca = new Date().toISOString().replace(/[:.]/g, "-");
     const clave = CLAVE_BACKUP_PREFIX + marca;
     localStorage.setItem(clave, actual);
-    const claves = Object.keys(localStorage)
-      .filter((k) => k.startsWith(CLAVE_BACKUP_PREFIX))
-      .sort();
-    while (claves.length > MAX_BACKUPS) {
-      const masVieja = claves.shift();
-      localStorage.removeItem(masVieja);
-    }
+    return true;
   } catch (e) {
     console.warn("No se pudo crear backup:", e);
+    return false;
   }
 }
 
@@ -212,7 +267,7 @@ function listarBackups() {
 function restaurarBackup(clave) {
   const datos = localStorage.getItem(clave);
   if (!datos) throw new Error("Backup no encontrado.");
-  hacerBackup();
+  if (!hacerBackup()) throw new Error("No se pudo proteger el estado actual con un backup. Exporta tus datos antes de restaurar.");
   localStorage.setItem(CLAVE_ALMACEN, datos);
   return obtenerDatos();
 }
@@ -238,36 +293,19 @@ function usoAlmacenamiento() {
   }
 }
 
-let ultimoAvisoCuota = 0;
 function guardarDatos(datos) {
-  if (datos && Array.isArray(datos.proyectos)) {
-    datos.proyectos = datos.proyectos.map((proyecto) => ({
-      ...proyecto,
-      paginas: Array.isArray(proyecto.paginas)
-        ? proyecto.paginas.map((pagina) => ({
-            ...pagina,
-            bloques: Array.isArray(pagina.bloques) ? pagina.bloques.map(sanitizarBloqueRecursivo) : [],
-          }))
-        : [],
-    }));
+  const normalizados = normalizarDatos(datos);
+  const serializado = JSON.stringify(normalizados);
+  if (serializado.length > MAX_BYTES_DATOS) {
+    throw new Error("El sitio supera el límite local de 1.5 MB. Reduce o elimina imágenes y vuelve a intentar.");
   }
-  hacerBackup();
-  const serializado = JSON.stringify(datos);
   try {
     localStorage.setItem(CLAVE_ALMACEN, serializado);
   } catch (e) {
     const nombre = (e && e.name) ? e.name : "Error";
-    if (nombre === "QuotaExceededError" || nombre === "NS_ERROR_DOM_QUOTA_REACHED" || serializado.length > 4_500_000) {
+    if (nombre === "QuotaExceededError" || nombre === "NS_ERROR_DOM_QUOTA_REACHED") {
       const uso = usoAlmacenamiento();
-      const ahora = Date.now();
-      if (ahora - ultimoAvisoCuota > 5000) {
-        ultimoAvisoCuota = ahora;
-        const msg = `⚠️ ALMACENAMIENTO LLENO (${uso.mb}MB / ${uso.limiteEstimadoMb}MB aprox.).\n\nExporta tu sitio como JSON (Botón Exportar), elimina imágenes grandes o contacta al desarrollador para migrar a un servidor.`;
-        if (typeof alert === "function") {
-          try { alert(msg); } catch {}
-        }
-        console.error(msg);
-      }
+      console.error(`ALMACENAMIENTO LLENO (${uso.mb}MB / ${uso.limiteEstimadoMb}MB aprox.).`);
     }
     throw e;
   }
@@ -283,9 +321,9 @@ function validarEsquemaDatos(obj) {
     errores.push("Raíz no es un objeto.");
     return errores;
   }
-  if (!obj.config || typeof obj.config !== "object") {
-    errores.push("Falta campo 'config' como objeto.");
-  } else {
+  if (obj.config !== undefined && typeof obj.config !== "object") {
+    errores.push("config debe ser un objeto.");
+  } else if (obj.config) {
     const camposConfigString = ["nombreSitio", "sloganSitio", "paginaInicioSlug", "colorPrincipal", "colorAcento", "colorFondo", "colorTexto", "fuenteCabecera", "fuenteCuerpo", "anchoContenido", "footerTexto", "footerEnlace"];
     camposConfigString.forEach((c) => {
       if (obj.config[c] !== undefined && typeof obj.config[c] !== "string") {
@@ -302,6 +340,7 @@ function validarEsquemaDatos(obj) {
     if (!proy || typeof proy !== "object") { errores.push(`proyectos[${pi}] no es objeto.`); return; }
     if (typeof proy.titulo !== "string" || !proy.titulo.trim()) errores.push(`proyectos[${pi}].titulo inválido.`);
     if (typeof proy.slug !== "string" || !proy.slug.trim()) errores.push(`proyectos[${pi}].slug inválido.`);
+    if (proy.config !== undefined && typeof proy.config !== "object") errores.push(`proyectos[${pi}].config debe ser objeto.`);
     if (!Array.isArray(proy.paginas)) { errores.push(`proyectos[${pi}].paginas no es array.`); return; }
     proy.paginas.forEach((pag, pgi) => {
       if (!pag || typeof pag !== "object") { errores.push(`proyectos[${pi}].paginas[${pgi}] no es objeto.`); return; }
@@ -347,7 +386,7 @@ function importarDatosDesdeJson(texto) {
     throw new Error("El archivo no tiene el formato esperado:\n - " + resumen);
   }
 
-  if (!datosImportados || typeof datosImportados !== "object" || !datosImportados.config || typeof datosImportados.config !== "object") {
+  if (!datosImportados || typeof datosImportados !== "object") {
     throw new Error("El archivo no tiene el formato esperado.");
   }
 
@@ -364,50 +403,25 @@ function importarDatosDesdeJson(texto) {
       ]
     : [];
 
-  const datosNormalizados = {
-    config: {
-      ...configPorDefecto(),
-      ...(datosImportados.config || {}),
-    },
-    proyectos: proyectos.map((proyecto) => ({
-      ...proyecto,
-      id: proyecto.id || generarId(),
-      titulo: proyecto.titulo || "Proyecto",
-      slug: generarSlug(proyecto.slug || proyecto.titulo || "proyecto") || "proyecto",
-      paginas: Array.isArray(proyecto.paginas)
-        ? proyecto.paginas.map((pagina) => ({
-            ...pagina,
-            id: pagina.id || generarId(),
-            titulo: pagina.titulo || "Página",
-            slug: generarSlug(pagina.slug || pagina.titulo || "pagina") || "pagina",
-            bloques: Array.isArray(pagina.bloques)
-              ? pagina.bloques.map((bloque) => sanitizarBloqueRecursivo({
-                  ...bloque,
-                  id: bloque.id || generarId(),
-                  tipo: bloque.tipo || "parrafo",
-                  orden: typeof bloque.orden === "number" ? bloque.orden : 0,
-                  datos: bloque.datos || {},
-                }))
-              : [],
-          }))
-        : [],
-    })),
-  };
+  const datosNormalizados = normalizarDatos({ config: datosImportados.config, proyectos });
 
+  if (!hacerBackup()) throw new Error("No se pudo crear un backup antes de importar. Exporta el sitio actual y libera espacio.");
   guardarDatos(datosNormalizados);
   return datosNormalizados;
 }
 
 /* ---------- Config del sitio ---------- */
 
-function obtenerConfig() {
-  const datos = obtenerDatos();
-  return { ...configPorDefecto(), ...datos.config };
+function obtenerConfig(proyectoId) {
+  const proyecto = proyectoId ? obtenerProyectoPorId(proyectoId) : null;
+  return normalizarConfig(proyecto ? proyecto.config : configPorDefecto());
 }
 
-function guardarConfig(config) {
+function guardarConfig(proyectoId, config) {
   const datos = obtenerDatos();
-  datos.config = { ...configPorDefecto(), ...datos.config, ...config };
+  const proyecto = datos.proyectos.find((item) => item.id === proyectoId);
+  if (!proyecto) throw new Error("Proyecto no encontrado.");
+  proyecto.config = normalizarConfig({ ...proyecto.config, ...config });
   guardarDatos(datos);
 }
 
@@ -434,7 +448,7 @@ function crearProyecto(titulo) {
     slug = `${slugBase}-${contador}`;
     contador++;
   }
-  const nuevo = { id: generarId(), titulo, slug, paginas: [] };
+  const nuevo = { id: generarId(), titulo, slug, config: configPorDefecto(), paginas: [] };
   datos.proyectos.push(nuevo);
   guardarDatos(datos);
   return nuevo;
@@ -445,7 +459,13 @@ function actualizarProyecto(id, cambios) {
   const proyecto = datos.proyectos.find((p) => p.id === id);
   if (!proyecto) return null;
   if (cambios.titulo !== undefined) proyecto.titulo = cambios.titulo;
-  if (cambios.slug !== undefined) proyecto.slug = generarSlug(cambios.slug) || proyecto.slug;
+  if (cambios.slug !== undefined) {
+    const base = generarSlug(cambios.slug) || proyecto.slug;
+    let slug = base;
+    let contador = 2;
+    while (datos.proyectos.some((item) => item.id !== id && item.slug === slug)) slug = `${base}-${contador++}`;
+    proyecto.slug = slug;
+  }
   guardarDatos(datos);
   return proyecto;
 }
@@ -524,7 +544,13 @@ function actualizarPaginaEnProyecto(proyectoId, paginaId, cambios) {
   const pagina = proyecto.paginas.find((p) => p.id === paginaId);
   if (!pagina) return null;
   if (cambios.titulo !== undefined) pagina.titulo = cambios.titulo;
-  if (cambios.slug !== undefined) pagina.slug = generarSlug(cambios.slug) || pagina.slug;
+  if (cambios.slug !== undefined) {
+    const base = generarSlug(cambios.slug) || pagina.slug;
+    let slug = base;
+    let contador = 2;
+    while (proyecto.paginas.some((item) => item.id !== paginaId && item.slug === slug)) slug = `${base}-${contador++}`;
+    pagina.slug = slug;
+  }
   guardarDatos(datos);
   return pagina;
 }
@@ -689,7 +715,7 @@ function reordenarBloque(paginaId, bloqueId, bloqueReferenciaId) {
 /* ---------- Reinicio total (por si algo se rompe en clase) ---------- */
 
 function reiniciarTodo() {
-  hacerBackup();
+  if (!hacerBackup()) throw new Error("No se pudo crear un backup. Exporta tus datos y libera espacio antes de reiniciar.");
   localStorage.removeItem(CLAVE_ALMACEN);
   return obtenerDatos();
 }

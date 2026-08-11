@@ -27,15 +27,14 @@ function aplicarConfigVisual(config) {
 }
 
 function pintarEncabezado() {
-  const config = obtenerConfig();
+  const nav = document.getElementById("nav-sitio");
+  const ruta = rutaActual();
+  const proyecto = ruta.proyectoSlug ? obtenerProyectoPorSlug(ruta.proyectoSlug) : null;
+  const config = obtenerConfig(proyecto?.id);
   aplicarConfigVisual(config);
   document.getElementById("nombre-sitio").textContent = config.nombreSitio;
   document.getElementById("slogan-sitio").textContent = config.sloganSitio || "";
   document.title = config.nombreSitio;
-
-  const nav = document.getElementById("nav-sitio");
-  const ruta = rutaActual();
-  const proyecto = ruta.proyectoSlug ? obtenerProyectoPorSlug(ruta.proyectoSlug) : null;
   const activoInicio = ruta.proyectoSlug === null ? " activo" : "";
 
   if (!proyecto) {
@@ -57,7 +56,8 @@ function pintarEncabezado() {
 
   const pie = document.getElementById("pie-sitio");
   if (pie) {
-    pie.innerHTML = `${escaparHtml(config.footerTexto || "Editable desde")} <a href="${escaparHtml(config.footerEnlace || "admin.html")}">${escaparHtml(config.footerEnlace || "admin.html")}</a>`;
+    const enlace = sanitizarUrl(config.footerEnlace || "admin.html");
+    pie.innerHTML = `${escaparHtml(config.footerTexto || "Editable desde")} <a href="${escaparHtml(enlace)}">${escaparHtml(enlace)}</a>`;
   }
 }
 
@@ -109,7 +109,7 @@ function obtenerPaginaDeRuta(ruta) {
   const proyecto = obtenerProyectoPorSlug(ruta.proyectoSlug);
   if (!proyecto) return null;
   if (!ruta.paginaSlug) {
-    const config = obtenerConfig();
+    const config = obtenerConfig(proyecto.id);
     const slugInicio = config && config.paginaInicioSlug ? String(config.paginaInicioSlug).trim() : "";
     let inicio = null;
     if (slugInicio) {
