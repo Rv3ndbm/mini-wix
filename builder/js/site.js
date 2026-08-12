@@ -1,6 +1,6 @@
 /* ============================================================
    site.js
-   Esta es la parte "pública" de tu mini Wix. No tiene botones
+   Esta es la parte "pública" de tu sitio en AutoPag. No tiene botones
    de editar ni nada de eso: solo lee lo que hay guardado y lo
    dibuja. La navegación usa el # de la URL (ej: index.html#/contacto)
    para no necesitar un servidor que maneje rutas.

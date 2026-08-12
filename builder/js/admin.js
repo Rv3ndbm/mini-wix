@@ -55,7 +55,7 @@ function renderizarPantallaLogin() {
         </form>
         <p style="text-align:center; margin: 20px 0 0; font-family: var(--fuente-mono); font-size: 11px; color: var(--tinta-suave);">
           Consejo: si perdiste la contraseña, abre la consola y ejecuta:<br/>
-          <code style="background:rgba(28,58,84,0.08); padding: 2px 6px; border-radius:4px;">localStorage.removeItem("miniwix_auth_v1")</code>
+          <code style="background:rgba(28,58,84,0.08); padding: 2px 6px; border-radius:4px;">localStorage.removeItem("autopag_auth_v1")</code>
         </p>
       </div>
     </div>`;
@@ -927,7 +927,7 @@ function renderizarEditor() {
     const url = URL.createObjectURL(blob);
     const enlace = document.createElement("a");
     enlace.href = url;
-    enlace.download = `miniwix-${new Date().toISOString().slice(0, 10)}.json`;
+    enlace.download = `autopag-${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(enlace);
     enlace.click();
     enlace.remove();
