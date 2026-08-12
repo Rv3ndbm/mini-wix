@@ -28,6 +28,21 @@
   --fuente-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 
+body.modo-oscuro {
+  --papel: #12161a;
+  --papel-oscuro: #181d22;
+  --plano: #e2eaf0;
+  --plano-claro: #8aabc2;
+  --tinta: #f4f6f8;
+  --tinta-suave: #aeb9c4;
+  --acento: #ff7d3b;
+  --acento-oscuro: #ff9b66;
+  --linea: rgba(255, 255, 255, 0.12);
+  --blanco: #1a1e23;
+  --sombra-suave: 0 20px 55px rgba(0, 0, 0, 0.5);
+  --sombra-card: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -638,6 +653,25 @@ h3.bloque-titulo {
 .bloque-wrapper--alinear-centro { text-align: center; justify-content: center; align-items: center; }
 .bloque-wrapper--alinear-derecha { text-align: right; justify-content: flex-end; align-items: flex-end; }
 .bloque-wrapper--alinear-izquierda { text-align: left; justify-content: flex-start; align-items: flex-start; }
+
+/* Drag and drop */
+.tarjeta-bloque[draggable="true"], .item-pagina[draggable="true"] {
+  cursor: grab;
+}
+.tarjeta-bloque[draggable="true"]:active, .item-pagina[draggable="true"]:active {
+  cursor: grabbing;
+}
+.drag-over {
+  border: 2px dashed var(--acento);
+  opacity: 0.7;
+  transform: scale(0.98);
+}
+.drag-over-top {
+  border-top: 3px solid var(--acento) !important;
+}
+.drag-over-bottom {
+  border-bottom: 3px solid var(--acento) !important;
+}
 
 .bloque-wrapper--espaciado-compacto { padding: 16px 20px; }
 .bloque-wrapper--espaciado-amplio { padding: 80px 40px; }

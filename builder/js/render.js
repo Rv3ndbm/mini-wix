@@ -266,6 +266,10 @@ function renderizarBloqueColumnas(d) {
   return `<div class="bloque-columnas bloque-columnas--${num}">${cols}</div>`;
 }
 
+function renderizarBloqueCodigo(d) {
+  return d.html || "<!-- Pega tu código HTML aquí -->";
+}
+
 function renderizarBloque(bloque) {
   const d = bloque.datos || {};
   let contenido;
@@ -326,6 +330,9 @@ function renderizarBloque(bloque) {
       break;
     case "columnas":
       contenido = renderizarBloqueColumnas(d);
+      break;
+    case "codigo":
+      contenido = renderizarBloqueCodigo(d);
       break;
     default:
       contenido = `<div class="bloque-desconocido">Tipo de bloque no reconocido: ${escaparHtml(bloque.tipo)}</div>`;

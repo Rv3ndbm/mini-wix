@@ -930,12 +930,28 @@ function datosVaciosParaTipo(tipo) {
 
 function actualizarBloque(paginaId, bloqueId, nuevosDatos) {
   const datos = obtenerDatos();
-  const { pagina } = buscarPaginaPorId(paginaId, datos);
-  if (!pagina) return null;
+  const res = buscarPaginaPorId(paginaId, datos);
+  if (!res || !res.pagina) return null;
+  const { pagina, proyecto } = res;
+  
   const bloque = pagina.bloques.find((b) => b.id === bloqueId);
   if (!bloque) return null;
+  
   const fusionado = sanitizarBloqueRecursivo({ ...bloque, datos: { ...bloque.datos, ...nuevosDatos } });
-  bloque.datos = fusionado.datos;
+  
+  // Si es un bloque global (header, footer, navbar), actualizarlo en TODAS las páginas
+  if (["header", "footer", "navbar"].includes(bloque.tipo)) {
+    proyecto.paginas.forEach(p => {
+      p.bloques.forEach(b => {
+        if (b.tipo === bloque.tipo) {
+          b.datos = JSON.parse(JSON.stringify(fusionado.datos));
+        }
+      });
+    });
+  } else {
+    bloque.datos = fusionado.datos;
+  }
+  
   guardarDatos(datos);
   return bloque;
 }

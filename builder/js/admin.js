@@ -147,6 +147,21 @@ function iniciar() {
   document.getElementById("btn-nueva-pagina").addEventListener("click", crearPaginaNueva);
   document.getElementById("btn-deshacer").addEventListener("click", ejecutarDeshacer);
   document.getElementById("btn-biblioteca-imagenes").addEventListener("click", abrirModalBiblioteca);
+  document.getElementById("btn-descargar-zip").addEventListener("click", exportarProyectoAZip);
+  
+  const btnModoOscuro = document.getElementById("btn-modo-oscuro");
+  if (btnModoOscuro) {
+    if (localStorage.getItem("autopag_theme") === "dark") {
+      document.body.classList.add("modo-oscuro");
+      btnModoOscuro.textContent = "☀️ Modo Claro";
+    }
+    btnModoOscuro.addEventListener("click", () => {
+      const isDark = document.body.classList.toggle("modo-oscuro");
+      localStorage.setItem("autopag_theme", isDark ? "dark" : "light");
+      btnModoOscuro.textContent = isDark ? "☀️ Modo Claro" : "🌙 Modo Oscuro";
+    });
+  }
+
   const buscarPanel = document.getElementById("buscar-panel");
   if (buscarPanel) {
     buscarPanel.value = filtroBusqueda;
@@ -293,7 +308,7 @@ function renderizarBarraLateral() {
     .map((pagina) => {
       const activo = pagina.id === idPaginaSeleccionada ? " activo" : "";
       return `
-        <li class="item-pagina${activo}" data-id="${pagina.id}">
+        <li class="item-pagina${activo}" data-id="${pagina.id}" draggable="true">
           <span class="item-pagina__info">
             ${escaparHtml(pagina.titulo)}<br />
             <span class="slug">/${escaparHtml(pagina.slug)}</span>
@@ -314,6 +329,8 @@ function renderizarBarraLateral() {
     listaPaginas.innerHTML = `<li class="aviso aviso--sidebar">Ninguna página coincide con la búsqueda.</li>`;
   }
 
+  let arrastrandoPaginaId = null;
+
   listaPaginas.querySelectorAll(".item-pagina").forEach((el) => {
     el.addEventListener("click", (e) => {
       if (e.target.closest(".item-accion")) return;
@@ -321,6 +338,57 @@ function renderizarBarraLateral() {
       renderizarBarraLateral();
       renderizarEditor();
       actualizarHash();
+    });
+
+    // Eventos Drag & Drop
+    el.addEventListener("dragstart", (e) => {
+      arrastrandoPaginaId = el.dataset.id;
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", arrastrandoPaginaId);
+      setTimeout(() => el.classList.add("drag-over"), 0);
+    });
+
+    el.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      const bounding = el.getBoundingClientRect();
+      const offset = bounding.y + bounding.height / 2;
+      el.classList.remove("drag-over-top", "drag-over-bottom");
+      if (e.clientY - offset > 0) {
+        el.classList.add("drag-over-bottom");
+      } else {
+        el.classList.add("drag-over-top");
+      }
+    });
+
+    el.addEventListener("dragleave", () => {
+      el.classList.remove("drag-over-top", "drag-over-bottom");
+    });
+
+    el.addEventListener("dragend", () => {
+      el.classList.remove("drag-over");
+      listaPaginas.querySelectorAll(".item-pagina").forEach(i => i.classList.remove("drag-over-top", "drag-over-bottom"));
+    });
+
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      el.classList.remove("drag-over-top", "drag-over-bottom");
+      if (!arrastrandoPaginaId || arrastrandoPaginaId === el.dataset.id) return;
+
+      const paginas = proyecto.paginas;
+      const indexOrigen = paginas.findIndex((p) => p.id === arrastrandoPaginaId);
+      let indexDestino = paginas.findIndex((p) => p.id === el.dataset.id);
+      
+      const bounding = el.getBoundingClientRect();
+      const offset = bounding.y + bounding.height / 2;
+      if (e.clientY - offset > 0) indexDestino++;
+
+      const [movido] = paginas.splice(indexOrigen, 1);
+      if (indexOrigen < indexDestino) indexDestino--;
+      paginas.splice(indexDestino, 0, movido);
+
+      actualizarProyecto(proyecto.id, { paginas });
+      renderizarBarraLateral();
     });
   });
 
@@ -1269,6 +1337,12 @@ function camposEditablesDeBloque(bloque) {
           <label>Columnas (una por línea)</label>
           <textarea data-campo="columnas" placeholder="Columna 1&#10;Columna 2">${textoParaTextarea((Array.isArray(d.columnas) ? d.columnas : []).join("\n"))}</textarea>
         </div>`;
+    case "codigo":
+      return `${estilos}
+        <div class="campo">
+          <label>Código Libre (HTML, iframe, scripts seguros)</label>
+          <textarea data-campo="html" style="font-family: monospace; min-height: 150px;" placeholder="<!-- Tu código HTML -->">${escaparHtml(d.html || "")}</textarea>
+        </div>`;
     default:
       return "";
   }
@@ -1458,6 +1532,83 @@ async function abrirModalSEOPagina(proyectoId, paginaId) {
   
   mostrarToast("Configuración SEO guardada correctamente.", "success");
   renderizarBarraLateral();
+}
+
+async function exportarProyectoAZip() {
+  if (typeof JSZip === 'undefined') {
+    mostrarToast("Error: JSZip no está cargado", "error");
+    return;
+  }
+  
+  const proyecto = obtenerProyectoSeleccionado();
+  if (!proyecto || !proyecto.paginas.length) {
+    mostrarToast("No hay páginas para exportar.", "info");
+    return;
+  }
+
+  const zip = new JSZip();
+  const config = proyecto.config || {};
+  const tituloBase = config.nombreSitio || "Sitio";
+  
+  // Agregar carpetas
+  const folderCSS = zip.folder("css");
+  const folderJS = zip.folder("js");
+  
+  try {
+    const cssRes = await fetch("css/style.css");
+    if (cssRes.ok) {
+      folderCSS.file("style.css", await cssRes.text());
+    } else {
+      folderCSS.file("style.css", "/* Estilos no encontrados localmente */");
+    }
+  } catch (e) {
+    folderCSS.file("style.css", "/* Error cargando CSS */");
+  }
+
+  try {
+    const jsRes = await fetch("js/site.js");
+    if (jsRes.ok) {
+      folderJS.file("site.js", await jsRes.text());
+    }
+  } catch (e) {}
+
+  // Generar HTML por cada página
+  proyecto.paginas.forEach((pagina) => {
+    const contenidoHTML = pagina.bloques.map(b => envolverBloque(renderizarBloque(b), b)).join("\n");
+    const tituloMeta = pagina.seoTitulo || `${pagina.titulo} | ${tituloBase}`;
+    const descMeta = pagina.seoDescripcion || config.sloganSitio || "";
+    
+    const htmlCompleto = `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escaparHtml(tituloMeta)}</title>
+  ${descMeta ? `<meta name="description" content="${escaparHtml(descMeta)}">` : ""}
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body style="--acento: ${escaparAtributo(config.colorAcento)}; --fondo-sitio: ${escaparAtributo(config.colorFondoSecundario)}">
+  ${contenidoHTML}
+  <script src="js/site.js"></script>
+</body>
+</html>`;
+
+    const fileName = pagina.slug === config.paginaInicioSlug || pagina.slug === "inicio" ? "index.html" : `${pagina.slug}.html`;
+    zip.file(fileName, htmlCompleto);
+  });
+
+  try {
+    const content = await zip.generateAsync({ type: "blob" });
+    const url = URL.createObjectURL(content);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${proyecto.slug || "sitio"}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+    mostrarToast("¡Sitio exportado con éxito!", "success");
+  } catch (e) {
+    mostrarToast("Error al generar el ZIP", "error");
+  }
 }
 
 window.addEventListener("DOMContentLoaded", iniciar);

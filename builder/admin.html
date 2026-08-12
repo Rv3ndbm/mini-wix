@@ -17,6 +17,11 @@
         <button type="button" class="boton-fantasma boton-fantasma--compacto" id="btn-deshacer" title="Deshacer último cambio">↩ Deshacer</button>
       </div>
 
+      <div class="header-acciones" style="display:flex; gap:10px; margin-bottom: 20px;">
+        <button class="boton-secundario" id="btn-modo-oscuro" style="flex:1;">🌙 Modo Oscuro</button>
+      </div>
+
+      <p class="etiqueta-tecnica">Páginas del proyecto</p>
       <button class="boton-fantasma" id="btn-nuevo-proyecto">+ Nuevo proyecto</button>
       <ul class="lista-proyectos" id="lista-proyectos"></ul>
 
@@ -27,8 +32,8 @@
         <button class="boton-fantasma" id="btn-nueva-pagina">+ Nueva página</button>
       </div>
 
-      <br />
       <button class="boton-fantasma" id="btn-biblioteca-imagenes">🖼 Biblioteca de imágenes</button>
+      <button class="boton-fantasma" id="btn-descargar-zip">📦 Exportar a ZIP</button>
       <button class="boton-fantasma" id="btn-reiniciar">↺ Reiniciar todo</button>
       <br /><br />
       <a class="enlace-previa" href="app.html" target="_blank" style="color:#dce8f2;">Ver sitio completo →</a>
@@ -37,7 +42,7 @@
       <!-- El editor de la página seleccionada se dibuja aquí -->
     </section>
   </div>
-
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="js/store.js"></script>
   <script src="js/render.js"></script>
   <script src="js/ui.js"></script>
