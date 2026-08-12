@@ -24,6 +24,37 @@ function aplicarConfigVisual(config) {
   document.documentElement.style.setProperty("--fuente-cuerpo", `${config.fuenteCuerpo || "Inter"}, "Segoe UI", sans-serif`);
   const ancho = Number(config.anchoContenido || 780);
   document.documentElement.style.setProperty("--ancho-pagina", `${Number.isFinite(ancho) ? ancho : 780}px`);
+  const temas = ["tema-clasico", "tema-portafolio", "tema-restaurante", "tema-empresa", "tema-producto", "tema-landing"];
+  document.body.classList.remove(...temas);
+  const tema = config.plantillaVisual && config.plantillaVisual !== "clasico" ? `tema-${config.plantillaVisual}` : "tema-clasico";
+  document.body.classList.add(tema);
+}
+
+function aplicarSeo(config, pagina) {
+  const titulo = (pagina && pagina.seoTitulo) || config.seoTitulo || config.nombreSitio || "Mi Sitio";
+  const descripcion = (pagina && pagina.seoDescripcion) || config.seoDescripcion || config.sloganSitio || "";
+  document.title = titulo;
+  const setMeta = (nombre, contenido) => {
+    if (!contenido) return;
+    let el = document.querySelector(`meta[name="${nombre}"]`);
+    if (!el) {
+      el = document.createElement("meta");
+      el.setAttribute("name", nombre);
+      document.head.appendChild(el);
+    }
+    el.setAttribute("content", contenido);
+  };
+  setMeta("description", descripcion);
+  setMeta("keywords", config.seoPalabrasClave || "");
+  if (config.seoImagen) {
+    let og = document.querySelector('meta[property="og:image"]');
+    if (!og) {
+      og = document.createElement("meta");
+      og.setAttribute("property", "og:image");
+      document.head.appendChild(og);
+    }
+    og.setAttribute("content", config.seoImagen);
+  }
 }
 
 function pintarEncabezado() {
@@ -32,6 +63,7 @@ function pintarEncabezado() {
   const proyecto = ruta.proyectoSlug ? obtenerProyectoPorSlug(ruta.proyectoSlug) : null;
   const config = obtenerConfig(proyecto?.id);
   aplicarConfigVisual(config);
+  aplicarSeo(config, null);
   document.getElementById("nombre-sitio").textContent = config.nombreSitio;
   document.getElementById("slogan-sitio").textContent = config.sloganSitio || "";
   document.title = config.nombreSitio;
@@ -40,11 +72,15 @@ function pintarEncabezado() {
   if (!proyecto) {
     const items = [
       `<li><a class="${activoInicio.trim()}" href="index.html">Inicio</a></li>`,
-      ...listarProyectos().map((proyecto) => `<li><a href="#/${escaparHtml(proyecto.slug)}">${escaparHtml(proyecto.titulo)}</a></li>`),
+      ...listarProyectosPublicos().map((proyectoItem) => `<li><a href="#/${escaparHtml(proyectoItem.slug)}">${escaparHtml(proyectoItem.titulo)}</a></li>`),
     ];
     nav.innerHTML = items.join("");
   } else {
-    const paginas = listarPaginasDeProyecto(proyecto.id);
+    if (proyecto.estadoPublicacion === "borrador") {
+      nav.innerHTML = `<li><a href="index.html">Inicio</a></li>`;
+      return;
+    }
+    const paginas = listarPaginasPublicasDeProyecto(proyecto.id);
     const items = [`<li><a href="index.html">Inicio</a></li>`].concat(
       paginas.map((pagina) => {
         const activo = pagina.slug === ruta.paginaSlug || (!ruta.paginaSlug && pagina.slug === proyecto.paginas[0]?.slug) ? " activo" : "";
@@ -62,7 +98,7 @@ function pintarEncabezado() {
 }
 
 function renderizarIndiceProyectos() {
-  const proyectos = listarProyectos();
+  const proyectos = listarProyectosPublicos();
   const tarjetas = proyectos
     .map((proyecto) => {
       const primeraPagina = proyecto.paginas?.[0] || null;
@@ -99,7 +135,7 @@ function renderizarIndiceProyectos() {
       </div>
     </section>
     <section class="dashboard-grilla">
-      ${tarjetas || `<div class="estado-vacio"><h2>No hay proyectos</h2><p>Crea tu primer proyecto desde <a href="admin.html">el panel de administración</a>.</p></div>`}
+      ${tarjetas || `<div class="estado-vacio estado-vacio--ilustrado"><div class="estado-vacio__icono">📁</div><h2>No hay proyectos publicados</h2><p>Crea y publica tu primer proyecto desde <a href="admin.html">el panel de administración</a>.</p></div>`}
     </section>
   `;
 }
@@ -107,22 +143,37 @@ function renderizarIndiceProyectos() {
 function obtenerPaginaDeRuta(ruta) {
   if (!ruta.proyectoSlug) return null;
   const proyecto = obtenerProyectoPorSlug(ruta.proyectoSlug);
-  if (!proyecto) return null;
+  if (!proyecto || proyecto.estadoPublicacion === "borrador") return null;
   if (!ruta.paginaSlug) {
     const config = obtenerConfig(proyecto.id);
     const slugInicio = config && config.paginaInicioSlug ? String(config.paginaInicioSlug).trim() : "";
     let inicio = null;
+    const paginasPublicas = listarPaginasPublicasDeProyecto(proyecto.id);
     if (slugInicio) {
-      inicio = (proyecto.paginas || []).find((p) => p.slug === slugInicio);
+      inicio = paginasPublicas.find((p) => p.slug === slugInicio);
     }
-    return inicio || proyecto.paginas[0] || null;
+    return inicio || paginasPublicas[0] || null;
   }
-  return obtenerPaginaPorSlugEnProyecto(ruta.paginaSlug, proyecto.id);
+  const pagina = obtenerPaginaPorSlugEnProyecto(ruta.paginaSlug, proyecto.id);
+  if (!pagina || pagina.estadoPublicacion === "borrador") return null;
+  return pagina;
 }
 
 function pintarPaginaActual() {
   const ruta = rutaActual();
-  const contenido = ruta.proyectoSlug === null ? renderizarIndiceProyectos() : renderizarPagina(obtenerPaginaDeRuta(ruta));
+  const proyecto = ruta.proyectoSlug ? obtenerProyectoPorSlug(ruta.proyectoSlug) : null;
+  const pagina = ruta.proyectoSlug ? obtenerPaginaDeRuta(ruta) : null;
+  if (proyecto && pagina) {
+    aplicarSeo(obtenerConfig(proyecto.id), pagina);
+  }
+  let contenido;
+  if (ruta.proyectoSlug === null) {
+    contenido = renderizarIndiceProyectos();
+  } else if (proyecto && proyecto.estadoPublicacion === "borrador") {
+    contenido = `<div class="estado-vacio estado-vacio--ilustrado"><div class="estado-vacio__icono">🔒</div><h2>Proyecto en borrador</h2><p>Este proyecto aún no está publicado. Publícalo desde el panel de administración.</p></div>`;
+  } else {
+    contenido = renderizarPagina(pagina);
+  }
   document.getElementById("contenido-pagina").innerHTML = contenido;
   pintarEncabezado();
   if (typeof inicializarAnimaciones === "function") inicializarAnimaciones();

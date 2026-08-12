@@ -12,6 +12,11 @@
       <h1>Panel de proyectos</h1>
       <p class="subtitulo">Gestiona tus aplicaciones y sus páginas</p>
 
+      <div class="barra-admin__herramientas">
+        <input type="search" id="buscar-panel" class="buscar-panel" placeholder="🔍 Buscar proyectos y páginas…" autocomplete="off" />
+        <button type="button" class="boton-fantasma boton-fantasma--compacto" id="btn-deshacer" title="Deshacer último cambio">↩ Deshacer</button>
+      </div>
+
       <button class="boton-fantasma" id="btn-nuevo-proyecto">+ Nuevo proyecto</button>
       <ul class="lista-proyectos" id="lista-proyectos"></ul>
 
@@ -23,6 +28,7 @@
       </div>
 
       <br />
+      <button class="boton-fantasma" id="btn-biblioteca-imagenes">🖼 Biblioteca de imágenes</button>
       <button class="boton-fantasma" id="btn-reiniciar">↺ Reiniciar todo</button>
       <br /><br />
       <a class="enlace-previa" href="app.html" target="_blank" style="color:#dce8f2;">Ver sitio completo →</a>
@@ -34,6 +40,7 @@
 
   <script src="js/store.js"></script>
   <script src="js/render.js"></script>
+  <script src="js/ui.js"></script>
   <script src="js/admin-utils.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/motion.js"></script>

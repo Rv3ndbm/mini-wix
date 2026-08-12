@@ -37,10 +37,16 @@ function crearTarjetasProyectos() {
   if (typeof inicializarAnimaciones === "function") inicializarAnimaciones();
 }
 
-function crearProyectoDesdeLanding() {
-  const titulo = prompt("Título del nuevo proyecto:", "Proyecto nuevo");
-  if (!titulo) return;
-  const proyecto = crearProyecto(titulo);
+async function crearProyectoDesdeLanding() {
+  const valores = await solicitarFormularioModal({
+    titulo: "Nuevo proyecto",
+    textoConfirmar: "Crear",
+    campos: [
+      { nombre: "titulo", etiqueta: "Título del nuevo proyecto", valor: "Proyecto nuevo", requerido: true }
+    ]
+  });
+  if (!valores || !valores.titulo) return;
+  const proyecto = crearProyecto(valores.titulo);
   crearPaginaEnProyecto(proyecto.id, "Inicio");
   window.location.href = `admin.html#/${encodeURIComponent(proyecto.slug)}`;
 }

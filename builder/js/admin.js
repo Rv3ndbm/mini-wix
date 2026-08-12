@@ -9,6 +9,8 @@
 let idProyectoSeleccionado = null;
 let idPaginaSeleccionada = null;
 let bloqueArrastradoId = null;
+let filtroBusqueda = "";
+let filtroBloques = "";
 
 function obtenerProyectoSeleccionado() {
   return idProyectoSeleccionado ? obtenerProyectoPorId(idProyectoSeleccionado) : null;
@@ -96,8 +98,9 @@ function anadirBotonLogout() {
   a.type = "button";
   a.textContent = "🚪 Cerrar sesión";
   a.style.marginTop = "8px";
-  a.addEventListener("click", () => {
-    if (!confirm("¿Cerrar sesión?")) return;
+  a.addEventListener("click", async () => {
+    const seguro = await confirmarModal("¿Cerrar sesión?", { titulo: "Cerrar sesión" });
+    if (!seguro) return;
     cerrarSesion();
     window.location.reload();
   });
@@ -142,19 +145,35 @@ function iniciar() {
 
   document.getElementById("btn-nuevo-proyecto").addEventListener("click", crearProyectoNuevo);
   document.getElementById("btn-nueva-pagina").addEventListener("click", crearPaginaNueva);
-  document.getElementById("btn-reiniciar").addEventListener("click", () => {
-    const seguro = confirm("⚠️ Esto borra TODAS las páginas y bloques que hayas creado. Antes se creará un backup automático.\n\n¿Continuar?");
+  document.getElementById("btn-deshacer").addEventListener("click", ejecutarDeshacer);
+  document.getElementById("btn-biblioteca-imagenes").addEventListener("click", abrirModalBiblioteca);
+  const buscarPanel = document.getElementById("buscar-panel");
+  if (buscarPanel) {
+    buscarPanel.value = filtroBusqueda;
+    buscarPanel.addEventListener("input", () => {
+      filtroBusqueda = buscarPanel.value.trim().toLowerCase();
+      renderizarBarraLateral();
+    });
+  }
+  actualizarBotonDeshacer();
+  document.getElementById("btn-reiniciar").addEventListener("click", async () => {
+    const seguro = await confirmarModal(
+      "Esto borra TODAS las páginas y bloques. Se creará un backup automático antes.",
+      { titulo: "Reiniciar todo", confirmar: "Reiniciar", peligro: true }
+    );
     if (!seguro) return;
     try {
       reiniciarTodo();
+      notificar("Sitio reiniciado correctamente.", "success");
     } catch (error) {
-      alert(`No se pudo reiniciar: ${error.message || "error desconocido"}`);
+      notificar(`No se pudo reiniciar: ${error.message || "error desconocido"}`, "error");
       return;
     }
     idProyectoSeleccionado = listarProyectos()[0]?.id || null;
     idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
     renderizarBarraLateral();
     renderizarEditor();
+    actualizarBotonDeshacer();
   });
 
   window.addEventListener("hashchange", () => {
@@ -174,10 +193,37 @@ function iniciar() {
 
 /* ---------- Barra lateral: proyectos y páginas ---------- */
 
+function actualizarBotonDeshacer() {
+  const btn = document.getElementById("btn-deshacer");
+  if (!btn) return;
+  const activo = typeof puedeDeshacer === "function" && puedeDeshacer();
+  btn.disabled = !activo;
+  btn.style.opacity = activo ? "1" : "0.45";
+}
+
+function ejecutarDeshacer() {
+  try {
+    const resultado = deshacerUltimoCambio();
+    idProyectoSeleccionado = listarProyectos()[0]?.id || null;
+    idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
+    renderizarBarraLateral();
+    renderizarEditor();
+    actualizarBotonDeshacer();
+    notificar(`Deshecho: ${resultado.etiqueta}`, "info");
+  } catch (e) {
+    notificar(e.message || "No se pudo deshacer.", "error");
+  }
+}
+
+function coincideBusqueda(texto) {
+  if (!filtroBusqueda) return true;
+  return String(texto || "").toLowerCase().includes(filtroBusqueda);
+}
+
 function renderizarBarraLateral() {
   const listaProyectos = document.getElementById("lista-proyectos");
   const listaPaginas = document.getElementById("lista-paginas");
-  const proyectos = listarProyectos();
+  const proyectos = listarProyectos().filter((p) => coincideBusqueda(`${p.titulo} ${p.slug}`));
   const proyecto = obtenerProyectoSeleccionado();
 
   listaProyectos.innerHTML = proyectos
@@ -185,13 +231,26 @@ function renderizarBarraLateral() {
       const activo = proyectoItem.id === idProyectoSeleccionado ? " activo" : "";
       return `
         <li class="item-proyecto${activo}" data-id="${proyectoItem.id}">
-          <span>${escaparHtml(proyectoItem.titulo)}<br /><span class="slug">/${escaparHtml(proyectoItem.slug)}</span></span>
+          <span class="item-proyecto__info">
+            ${escaparHtml(proyectoItem.titulo)}<br />
+            <span class="slug">/${escaparHtml(proyectoItem.slug)}</span>
+            ${badgeEstado(proyectoItem.estadoPublicacion)}
+          </span>
+          <span class="item-acciones">
+            <button type="button" class="item-accion" data-accion="editar-proyecto" data-id="${proyectoItem.id}" title="Editar">✎</button>
+            <button type="button" class="item-accion" data-accion="duplicar-proyecto" data-id="${proyectoItem.id}" title="Duplicar">⧉</button>
+          </span>
         </li>`;
     })
     .join("");
 
+  if (!proyectos.length) {
+    listaProyectos.innerHTML = `<li class="aviso aviso--sidebar">No hay proyectos que coincidan con la búsqueda.</li>`;
+  }
+
   listaProyectos.querySelectorAll(".item-proyecto").forEach((el) => {
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".item-accion")) return;
       idProyectoSeleccionado = el.dataset.id;
       idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
       renderizarBarraLateral();
@@ -200,61 +259,260 @@ function renderizarBarraLateral() {
     });
   });
 
+  listaProyectos.querySelectorAll('[data-accion="editar-proyecto"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirModalEditarProyecto(btn.dataset.id);
+    });
+  });
+  listaProyectos.querySelectorAll('[data-accion="duplicar-proyecto"]').forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const copia = duplicarProyecto(btn.dataset.id);
+      if (copia) {
+        idProyectoSeleccionado = copia.id;
+        idPaginaSeleccionada = copia.paginas[0]?.id || null;
+        renderizarBarraLateral();
+        renderizarEditor();
+        actualizarBotonDeshacer();
+        notificar("Proyecto duplicado como borrador.", "success");
+      }
+    });
+  });
+
   if (!proyecto) {
-    listaPaginas.innerHTML = `<li class="aviso">Crea un proyecto para poder agregar páginas.</li>`;
+    listaPaginas.innerHTML = `<li class="aviso aviso--sidebar">Crea un proyecto para agregar páginas.</li>`;
     document.getElementById("btn-nueva-pagina").disabled = true;
     return;
   }
 
   document.getElementById("btn-nueva-pagina").disabled = false;
 
-  listaPaginas.innerHTML = proyecto.paginas
+  const paginasFiltradas = proyecto.paginas.filter((p) => coincideBusqueda(`${p.titulo} ${p.slug}`));
+  listaPaginas.innerHTML = paginasFiltradas
     .map((pagina) => {
       const activo = pagina.id === idPaginaSeleccionada ? " activo" : "";
       return `
         <li class="item-pagina${activo}" data-id="${pagina.id}">
-          <span>${escaparHtml(pagina.titulo)}<br /><span class="slug">/${escaparHtml(pagina.slug)}</span></span>
+          <span class="item-pagina__info">
+            ${escaparHtml(pagina.titulo)}<br />
+            <span class="slug">/${escaparHtml(pagina.slug)}</span>
+            ${badgeEstado(pagina.estadoPublicacion)}
+          </span>
+          <span class="item-acciones">
+            <button type="button" class="item-accion" data-accion="editar-pagina" data-id="${pagina.id}" title="Editar">✎</button>
+            <button type="button" class="item-accion" data-accion="editar-seo" data-id="${pagina.id}" title="SEO">🔍</button>
+            <button type="button" class="item-accion" data-accion="duplicar-pagina" data-id="${pagina.id}" title="Duplicar">⧉</button>
+          </span>
         </li>`;
     })
     .join("");
 
   if (!proyecto.paginas.length) {
-    listaPaginas.innerHTML = `<li class="aviso">Este proyecto no tiene páginas aún. Crea una nueva página.</li>`;
+    listaPaginas.innerHTML = `<li class="aviso aviso--sidebar">Este proyecto no tiene páginas. Crea una nueva.</li>`;
+  } else if (!paginasFiltradas.length) {
+    listaPaginas.innerHTML = `<li class="aviso aviso--sidebar">Ninguna página coincide con la búsqueda.</li>`;
   }
 
   listaPaginas.querySelectorAll(".item-pagina").forEach((el) => {
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (e) => {
+      if (e.target.closest(".item-accion")) return;
       idPaginaSeleccionada = el.dataset.id;
       renderizarBarraLateral();
       renderizarEditor();
       actualizarHash();
     });
   });
+
+  listaPaginas.querySelectorAll('[data-accion="editar-pagina"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirModalEditarPagina(btn.dataset.id);
+    });
+  });
+
+  listaPaginas.querySelectorAll('[data-accion="editar-seo"]').forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      abrirModalSEOPagina(proyecto.id, btn.dataset.id);
+    });
+  });
+
+  listaPaginas.querySelectorAll('[data-accion="duplicar-pagina"]').forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const copia = duplicarPaginaEnProyecto(proyecto.id, btn.dataset.id);
+      if (copia) {
+        idPaginaSeleccionada = copia.id;
+        renderizarBarraLateral();
+        renderizarEditor();
+        actualizarBotonDeshacer();
+        notificar("Página duplicada como borrador.", "success");
+      }
+    });
+  });
 }
 
-function crearProyectoNuevo() {
-  const titulo = solicitarTexto("Título del nuevo proyecto:", "Proyecto nuevo") || "Proyecto nuevo";
-  const proyecto = crearProyecto(titulo);
-  const pagina = crearPaginaEnProyecto(proyecto.id, "Inicio");
+async function crearProyectoNuevo() {
+  const valores = await solicitarFormularioModal({
+    titulo: "Nuevo proyecto",
+    textoConfirmar: "Crear proyecto",
+    ancho: "520px",
+    campos: [
+      { nombre: "titulo", etiqueta: "Título del proyecto", valor: "Proyecto nuevo", requerido: true },
+      { nombre: "plantilla", etiqueta: "Plantilla visual", tipo: "select", valor: "vacia", opciones: OPCIONES_PLANTILLA_PROYECTO },
+    ],
+  });
+  if (!valores) return;
+  const proyecto = crearProyecto(valores.titulo || "Proyecto nuevo", { plantilla: valores.plantilla || "vacia" });
   idProyectoSeleccionado = proyecto.id;
-  idPaginaSeleccionada = pagina.id;
+  idPaginaSeleccionada = proyecto.paginas?.[0]?.id || null;
   renderizarBarraLateral();
   renderizarEditor();
   actualizarHash();
+  actualizarBotonDeshacer();
+  notificar("Proyecto creado correctamente.", "success");
 }
 
-function crearPaginaNueva() {
+async function crearPaginaNueva() {
   const proyecto = obtenerProyectoSeleccionado();
   if (!proyecto) {
-    alert("Selecciona un proyecto primero.");
+    notificar("Selecciona un proyecto primero.", "warning");
     return;
   }
-  const titulo = solicitarTexto("Título de la nueva página:", "Página nueva") || "Página nueva";
-  const pagina = crearPaginaEnProyecto(proyecto.id, titulo);
+  const valores = await solicitarFormularioModal({
+    titulo: "Nueva página",
+    textoConfirmar: "Crear página",
+    campos: [
+      { nombre: "titulo", etiqueta: "Título de la página", valor: "Página nueva", requerido: true },
+      { nombre: "plantilla", etiqueta: "Contenido inicial", tipo: "select", valor: "vacia", opciones: OPCIONES_PLANTILLA_PAGINA },
+    ],
+  });
+  if (!valores) return;
+  const pagina = crearPaginaEnProyecto(proyecto.id, valores.titulo || "Página nueva");
+  if (valores.plantilla && valores.plantilla !== "vacia") {
+    aplicarPlantillaAPagina(pagina.id, valores.plantilla);
+  }
   idPaginaSeleccionada = pagina.id;
   renderizarBarraLateral();
   renderizarEditor();
   actualizarHash();
+  actualizarBotonDeshacer();
+  notificar("Página creada.", "success");
+}
+
+async function abrirModalEditarProyecto(proyectoId) {
+  const proyecto = obtenerProyectoPorId(proyectoId);
+  if (!proyecto) return;
+  const valores = await solicitarFormularioModal({
+    titulo: "Editar proyecto",
+    campos: [
+      { nombre: "titulo", etiqueta: "Título", valor: proyecto.titulo, requerido: true },
+      { nombre: "slug", etiqueta: "Slug / URL", valor: proyecto.slug, requerido: true },
+      {
+        nombre: "estado",
+        etiqueta: "Estado",
+        tipo: "select",
+        valor: proyecto.estadoPublicacion,
+        opciones: [
+          { valor: "publicado", etiqueta: "Publicado" },
+          { valor: "borrador", etiqueta: "Borrador" },
+        ],
+      },
+    ],
+  });
+  if (!valores) return;
+  actualizarProyecto(proyectoId, { titulo: valores.titulo, slug: valores.slug });
+  cambiarEstadoProyecto(proyectoId, valores.estado);
+  if (idProyectoSeleccionado === proyectoId) renderizarEditor();
+  renderizarBarraLateral();
+  actualizarHash();
+  actualizarBotonDeshacer();
+  notificar("Proyecto actualizado.", "success");
+}
+
+async function abrirModalEditarPagina(paginaId) {
+  const proyecto = obtenerProyectoSeleccionado();
+  if (!proyecto) return;
+  const pagina = obtenerPaginaPorIdEnProyecto(paginaId, proyecto.id);
+  if (!pagina) return;
+  const valores = await solicitarFormularioModal({
+    titulo: "Editar página",
+    campos: [
+      { nombre: "titulo", etiqueta: "Título", valor: pagina.titulo, requerido: true },
+      { nombre: "slug", etiqueta: "Slug / URL", valor: pagina.slug, requerido: true },
+      {
+        nombre: "estado",
+        etiqueta: "Estado",
+        tipo: "select",
+        valor: pagina.estadoPublicacion,
+        opciones: [
+          { valor: "publicado", etiqueta: "Publicado" },
+          { valor: "borrador", etiqueta: "Borrador" },
+        ],
+      },
+    ],
+  });
+  if (!valores) return;
+  actualizarPaginaEnProyecto(proyecto.id, paginaId, { titulo: valores.titulo, slug: valores.slug });
+  cambiarEstadoPagina(proyecto.id, paginaId, valores.estado);
+  renderizarBarraLateral();
+  renderizarEditor();
+  actualizarHash();
+  actualizarBotonDeshacer();
+  notificar("Página actualizada.", "success");
+}
+
+function abrirModalBiblioteca() {
+  const imgs = listarBibliotecaImagenes();
+  const grid = imgs.length
+    ? imgs
+        .map(
+          (img) =>
+            `<button type="button" class="biblioteca-item" data-url="${escaparAtributo(img.url)}" title="${escaparAtributo(img.nombre)}">
+              <img src="${escaparAtributo(img.url)}" alt="" loading="lazy" />
+              <span>${escaparHtml(img.nombre)}</span>
+            </button>`
+        )
+        .join("")
+    : `<div class="estado-vacio estado-vacio--compacto"><div class="estado-vacio__icono">🖼</div><p>Sube imágenes desde los bloques de imagen o galería para verlas aquí.</p></div>`;
+
+  const modal = abrirModal({
+    titulo: "Biblioteca de imágenes",
+    ancho: "720px",
+    cuerpo: `
+      <p class="modal-texto">Imágenes guardadas localmente en este navegador (${imgs.length}). Haz clic para copiar la URL.</p>
+      <div class="biblioteca-grilla">${grid}</div>
+      <div class="campo" style="margin-top:16px;">
+        <label>Subir a la biblioteca</label>
+        <input type="file" id="bib-upload" accept="image/*" multiple />
+      </div>`,
+    acciones: `<button type="button" class="boton-secundario" data-cerrar="btn">Cerrar</button>`,
+  });
+
+  modal.root.querySelectorAll(".biblioteca-item").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.url);
+        notificar("URL copiada al portapapeles.", "info");
+      } catch {
+        notificar("URL lista — pégala manualmente en un bloque de imagen.", "info");
+      }
+    });
+  });
+
+  const upload = modal.root.querySelector("#bib-upload");
+  upload.addEventListener("change", () => {
+    const archivos = Array.from(upload.files || []);
+    Promise.all(archivos.map((a) => subirImagenConBiblioteca(a)))
+      .then(() => {
+        cerrarModal();
+        abrirModalBiblioteca();
+        notificar(`${archivos.length} imagen(es) añadida(s).`, "success");
+        actualizarBotonDeshacer();
+      })
+      .catch((e) => notificar(e.message, "error"));
+  });
 }
 
 /* ---------- Editor principal ---------- */
@@ -445,9 +703,12 @@ function renderizarEditor() {
     </div>
 
     <p class="etiqueta-tecnica">Agregar bloque</p>
-    <div class="paleta-bloques">
+    <div class="campo" style="margin-bottom:12px;">
+      <input type="search" id="buscar-bloques" class="buscar-bloques" placeholder="🔍 Buscar tipo de bloque..." autocomplete="off" />
+    </div>
+    <div class="paleta-bloques" id="paleta-bloques">
       ${Object.entries(ETIQUETAS_TIPO_BLOQUE)
-        .map(([tipo, etiqueta]) => `<button class="chip-bloque" data-tipo="${tipo}">+ ${etiqueta}</button>`)
+        .map(([tipo, etiqueta]) => `<button class="chip-bloque" data-tipo="${tipo}" data-etiqueta="${etiqueta}">+ ${etiqueta}</button>`)
         .join("")}
     </div>
 
@@ -474,7 +735,7 @@ function renderizarEditor() {
       footerEnlace: document.getElementById("campo-footer-enlace").value.trim() !== "" ? document.getElementById("campo-footer-enlace").value.trim() : config.footerEnlace,
     });
     renderizarEditor();
-    alert("✅ Configuración guardada correctamente.");
+    notificar("Configuración guardada correctamente.", "success");
   });
 
   document.getElementById("btn-guardar-proyecto").addEventListener("click", () => {
@@ -488,99 +749,130 @@ function renderizarEditor() {
 
   const btnBackups = document.getElementById("btn-gestionar-backups");
   if (btnBackups) {
-    btnBackups.addEventListener("click", () => {
+    btnBackups.addEventListener("click", async () => {
       const backups = listarBackups ? listarBackups() : [];
       if (!backups.length) {
-        alert("Aún no hay backups. Se crea una copia antes de importar, restaurar o reiniciar datos.");
+        notificar("Aún no hay backups. Se crea una copia antes de importar, restaurar o reiniciar datos.", "info");
         return;
       }
-      const lista = backups.map((b, i) =>
-        `${i + 1}) [${b.marca}] — ${Math.round(b.tamano / 1024)} KB`
-      ).join("\n");
-      const elegir = prompt(
-        `Backups disponibles (${backups.length}):\n\n${lista}\n\n` +
-        `Escribe el NÚMERO del backup que quieres restaurar (1-${backups.length})\n` +
-        `O escribe 0 para cancelar:`,
-        "1"
-      );
-      if (!elegir) return;
-      const num = parseInt(elegir, 10);
-      if (!num || num < 1 || num > backups.length) return;
-      const backupElegido = backups[num - 1];
-      const confirma = confirm(
-        `⚠️ Vas a restaurar el backup ${backupElegido.marca}.\n\n` +
-        `Esto REEMPLAZARÁ todos tus datos actuales. Se guardará un backup del estado presente antes.\n\n` +
-        `¿Continuar?`
+      const opciones = backups.map((b, i) => ({
+        titulo: `Backup ${i + 1}`,
+        subtitulo: `${b.marca} — ${Math.round(b.tamano / 1024)} KB`,
+        valor: b
+      }));
+      const elegido = await elegirDeListaModal({
+        titulo: "Restaurar backup",
+        textoConfirmar: "Restaurar",
+        items: opciones
+      });
+      if (!elegido) return;
+      const confirma = await confirmarModal(
+        `⚠️ Vas a restaurar el backup ${elegido.valor.marca}.\n\nEsto REEMPLAZARÁ todos tus datos actuales. Se guardará un backup del estado presente antes.\n\n¿Continuar?`,
+        { titulo: "Confirmar restauración", peligro: true }
       );
       if (!confirma) return;
       try {
-        restaurarBackup(backupElegido.clave);
+        restaurarBackup(elegido.valor.clave);
         idProyectoSeleccionado = listarProyectos()[0]?.id || null;
         idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
         renderizarBarraLateral();
         renderizarEditor();
-        alert("✅ Backup restaurado correctamente.");
+        notificar("Backup restaurado correctamente.", "success");
       } catch (e) {
-        alert("❌ No se pudo restaurar el backup: " + (e.message || "Error desconocido"));
+        notificar("No se pudo restaurar el backup: " + (e.message || "Error desconocido"), "error");
       }
     });
   }
 
   const btnAuth = document.getElementById("btn-gestionar-auth");
   if (btnAuth) {
-    btnAuth.addEventListener("click", () => {
+    btnAuth.addEventListener("click", async () => {
       const activa = estaProteccionActiva && estaProteccionActiva();
       if (!activa) {
-        const nueva = prompt("Introduce una NUEVA contraseña para proteger el panel (mín. 4 caracteres):\n\n(Consejo: escribe una que recordarás. Si la pierdes, tendrás que borrar manualmente localStorage.)");
-        if (!nueva) return;
-        const confirmar = prompt("Repite la misma contraseña para confirmar:");
-        if (confirmar === null) return;
-        if (nueva !== confirmar) {
-          alert("❌ Las contraseñas no coinciden. Operación cancelada.");
+        const valores = await solicitarFormularioModal({
+          titulo: "Proteger panel",
+          textoConfirmar: "Guardar",
+          campos: [
+            { nombre: "nueva", etiqueta: "Nueva contraseña (mín. 4 caracteres)", tipo: "password", requerido: true },
+            { nombre: "confirmar", etiqueta: "Repite la contraseña", tipo: "password", requerido: true }
+          ]
+        });
+        if (!valores) return;
+        if (valores.nueva !== valores.confirmar) {
+          mostrarToast("Las contraseñas no coinciden.", "error");
           return;
         }
         try {
-          establecerContrasena(nueva);
+          establecerContrasena(valores.nueva);
           renderizarEditor();
-          alert("✅ Contraseña establecida correctamente. El panel ahora está protegido.");
+          mostrarToast("Panel protegido correctamente.", "success");
         } catch (e) {
-          alert("❌ " + (e.message || "Error al establecer contraseña."));
+          mostrarToast(e.message || "Error al establecer contraseña.", "error");
         }
         return;
       }
-      const accion = prompt(
-        "🔐 Panel protegido con contraseña.\n\n" +
-        "¿Qué quieres hacer?\n" +
-        "  1) Cambiar la contraseña\n" +
-        "  2) Quitar la protección\n" +
-        "  3) Cancelar\n\n" +
-        "Escribe el número de la opción:",
-        "1"
-      );
-      if (!accion) return;
-      if (accion === "1") {
-        const actual = prompt("Escribe tu contraseña ACTUAL:");
-        if (actual === null) return;
-        if (!verificarContrasena(actual)) { alert("❌ Contraseña incorrecta."); return; }
-        const nueva = prompt("Escribe la NUEVA contraseña (mín. 4 caracteres):");
-        if (!nueva) return;
-        const confirmar = prompt("Repite la nueva contraseña:");
-        if (confirmar === null) return;
-        if (nueva !== confirmar) { alert("❌ Las contraseñas nuevas no coinciden."); return; }
+      
+      const seleccion = await elegirDeListaModal({
+        titulo: "Seguridad del Panel",
+        items: [
+          { titulo: "Cambiar contraseña", subtitulo: "Actualiza tu clave de acceso." },
+          { titulo: "Quitar protección", subtitulo: "El panel será accesible para todos." }
+        ]
+      });
+      if (!seleccion) return;
+
+      if (seleccion.titulo === "Cambiar contraseña") {
+        const valores = await solicitarFormularioModal({
+          titulo: "Cambiar contraseña",
+          campos: [
+            { nombre: "actual", etiqueta: "Contraseña actual", tipo: "password", requerido: true },
+            { nombre: "nueva", etiqueta: "Nueva contraseña", tipo: "password", requerido: true },
+            { nombre: "confirmar", etiqueta: "Repite nueva contraseña", tipo: "password", requerido: true }
+          ]
+        });
+        if (!valores) return;
+        if (!verificarContrasena(valores.actual)) {
+          mostrarToast("Contraseña actual incorrecta.", "error");
+          return;
+        }
+        if (valores.nueva !== valores.confirmar) {
+          mostrarToast("Las contraseñas nuevas no coinciden.", "error");
+          return;
+        }
         try {
-          establecerContrasena(nueva);
-          alert("✅ Contraseña cambiada correctamente.");
+          establecerContrasena(valores.nueva);
+          mostrarToast("Contraseña cambiada.", "success");
           renderizarEditor();
-        } catch (e) { alert("❌ " + (e.message || "Error.")); }
-      } else if (accion === "2") {
-        const actual = prompt("Escribe tu contraseña ACTUAL para confirmar y quitar la protección:");
-        if (actual === null) return;
+        } catch (e) { mostrarToast(e.message || "Error.", "error"); }
+      } else if (seleccion.titulo === "Quitar protección") {
+        const valores = await solicitarFormularioModal({
+          titulo: "Quitar protección",
+          textoConfirmar: "Eliminar",
+          campos: [
+            { nombre: "actual", etiqueta: "Escribe tu contraseña actual para confirmar", tipo: "password", requerido: true }
+          ]
+        });
+        if (!valores) return;
         try {
-          quitarProteccion(actual);
-          alert("✅ Protección eliminada correctamente.");
+          quitarProteccion(valores.actual);
+          mostrarToast("Protección eliminada.", "success");
           renderizarEditor();
-        } catch (e) { alert("❌ " + (e.message || "Contraseña incorrecta.")); }
+        } catch (e) { mostrarToast("Contraseña incorrecta.", "error"); }
       }
+    });
+  }
+
+  const buscarBloques = document.getElementById("buscar-bloques");
+  if (buscarBloques) {
+    buscarBloques.addEventListener("input", () => {
+      const filtro = buscarBloques.value.trim().toLowerCase();
+      const paleta = document.getElementById("paleta-bloques");
+      paleta.querySelectorAll(".chip-bloque").forEach((btn) => {
+        const etiqueta = btn.dataset.etiqueta?.toLowerCase() || "";
+        const tipo = btn.dataset.tipo?.toLowerCase() || "";
+        const coincide = etiqueta.includes(filtro) || tipo.includes(filtro);
+        btn.style.display = coincide ? "" : "none";
+      });
     });
   }
 
@@ -600,18 +892,25 @@ function renderizarEditor() {
     actualizarHash();
   });
 
-  document.getElementById("btn-eliminar-pagina").addEventListener("click", () => {
-    const seguro = confirm(`¿Eliminar la página "${pagina.titulo}"? Esta acción no se puede deshacer.`);
+  document.getElementById("btn-eliminar-pagina").addEventListener("click", async () => {
+    const seguro = await confirmarModal(
+      `¿Eliminar la página "${pagina.titulo}"? Esta acción no se puede deshacer.`,
+      { titulo: "Eliminar página", peligro: true }
+    );
     if (!seguro) return;
     eliminarPaginaEnProyecto(proyecto.id, pagina.id);
     idPaginaSeleccionada = listarPaginasDeProyecto(proyecto.id)[0]?.id || null;
     renderizarBarraLateral();
     renderizarEditor();
-    actualizarHash();
+    actualizarBotonDeshacer();
+    notificar("Página eliminada.", "success");
   });
 
-  document.getElementById("btn-eliminar-proyecto").addEventListener("click", () => {
-    const seguro = confirm(`¿Eliminar el proyecto "${proyecto.titulo}" y todas sus páginas? Esta acción no se puede deshacer.`);
+  document.getElementById("btn-eliminar-proyecto").addEventListener("click", async () => {
+    const seguro = await confirmarModal(
+      `¿Eliminar el proyecto "${proyecto.titulo}" y todas sus páginas? Esta acción no se puede deshacer.`,
+      { titulo: "Eliminar proyecto", peligro: true }
+    );
     if (!seguro) return;
     eliminarProyecto(proyecto.id);
     idProyectoSeleccionado = listarProyectos()[0]?.id || null;
@@ -619,6 +918,8 @@ function renderizarEditor() {
     renderizarBarraLateral();
     renderizarEditor();
     actualizarHash();
+    actualizarBotonDeshacer();
+    notificar("Proyecto eliminado.", "success");
   });
 
   document.getElementById("btn-exportar").addEventListener("click", () => {
@@ -637,15 +938,14 @@ function renderizarEditor() {
     document.getElementById("input-importar").click();
   });
 
-  document.getElementById("input-importar").addEventListener("change", (evento) => {
+  document.getElementById("input-importar").addEventListener("change", async (evento) => {
     const archivo = evento.target.files?.[0];
     if (!archivo) return;
 
     const proyectosActuales = listarProyectos().length;
-    const confirma = confirm(
-      `⚠️ IMPORTANTE: Importar un archivo reemplazará TODO el contenido actual (${proyectosActuales} proyecto(s)).\n\n` +
-      `Se creará un backup automático de tu estado actual antes de importar.\n\n` +
-      `¿Estás SEGURO de continuar?`
+    const confirma = await confirmarModal(
+      `⚠️ IMPORTANTE: Importar un archivo reemplazará TODO el contenido actual (${proyectosActuales} proyecto(s)).\n\nSe creará un backup automático de tu estado actual antes de importar.\n\n¿Estás SEGURO de continuar?`,
+      { titulo: "Confirmar importación", peligro: true }
     );
     if (!confirma) {
       evento.target.value = "";
@@ -660,16 +960,16 @@ function renderizarEditor() {
         idPaginaSeleccionada = listarPaginasDeProyecto(idProyectoSeleccionado)[0]?.id || null;
         renderizarBarraLateral();
         renderizarEditor();
-        alert("✅ Sitio importado correctamente. Se ha creado un backup del estado anterior.");
+        notificar("Sitio importado correctamente. Se ha creado un backup del estado anterior.", "success");
       } catch (error) {
         console.error("No se pudo importar el sitio", error);
-        alert("❌ No se pudo importar el archivo.\n\nDetalles:\n" + (error.message || "Error desconocido"));
+        notificar("No se pudo importar el archivo.\n\nDetalles:\n" + (error.message || "Error desconocido"), "error");
       } finally {
         evento.target.value = "";
       }
     };
     lector.onerror = () => {
-      alert("No se pudo leer el archivo seleccionado.");
+      notificar("No se pudo leer el archivo seleccionado.", "error");
       evento.target.value = "";
     };
     lector.readAsText(archivo);
@@ -681,13 +981,13 @@ function renderizarEditor() {
     chip.addEventListener("click", () => {
       const paginaLocal = obtenerPaginaSeleccionada();
       if (!paginaLocal) {
-        alert("Selecciona un proyecto y una página antes de agregar bloques.");
+        notificar("Selecciona un proyecto y una página antes de agregar bloques.", "warning");
         return;
       }
       const resultado = agregarBloque(paginaLocal.id, chip.dataset.tipo);
       if (!resultado) {
         console.error("No se pudo agregar el bloque. Página no encontrada.");
-        alert("Error al agregar bloque. Intenta recargar la página.");
+        notificar("Error al agregar bloque. Intenta recargar la página.", "error");
         return;
       }
       renderizarEditor();
@@ -710,6 +1010,7 @@ function renderizarTarjetaBloque(bloque, indice, total) {
         <div class="acciones-bloque">
           <button data-accion="subir" ${indice === 0 ? "disabled" : ""} title="Subir">↑</button>
           <button data-accion="bajar" ${indice === total - 1 ? "disabled" : ""} title="Bajar">↓</button>
+          <button data-accion="duplicar" title="Duplicar">⧉</button>
           <button data-accion="eliminar" title="Eliminar">✕</button>
         </div>
       </div>
@@ -721,7 +1022,7 @@ function renderizarTarjetaBloque(bloque, indice, total) {
 function camposComunesBloque(d) {
   return `
     <div class="fila-campos">
-      <div class="campo" style="flex:1; min-width:180px;">
+      <div class="campo" style="flex:1; min-width:140px;">
         <label>Tamaño</label>
         <select data-campo="tamano">
           <option value="normal" ${d.tamano === "normal" ? "selected" : ""}>Normal</option>
@@ -729,17 +1030,53 @@ function camposComunesBloque(d) {
           <option value="completo" ${d.tamano === "completo" ? "selected" : ""}>Completo</option>
         </select>
       </div>
-      <div class="campo" style="flex:1; min-width:180px;">
+      <div class="campo" style="flex:1; min-width:140px;">
+        <label>Alineación</label>
+        <select data-campo="alineacion">
+          <option value="izquierda" ${d.alineacion === "izquierda" ? "selected" : ""}>Izquierda</option>
+          <option value="centro" ${d.alineacion === "centro" ? "selected" : ""}>Centro</option>
+          <option value="derecha" ${d.alineacion === "derecha" ? "selected" : ""}>Derecha</option>
+        </select>
+      </div>
+      <div class="campo" style="flex:1; min-width:140px;">
+        <label>Espaciado</label>
+        <select data-campo="espaciado">
+          <option value="normal" ${d.espaciado === "normal" || !d.espaciado ? "selected" : ""}>Normal</option>
+          <option value="compacto" ${d.espaciado === "compacto" ? "selected" : ""}>Compacto</option>
+          <option value="amplio" ${d.espaciado === "amplio" ? "selected" : ""}>Amplio</option>
+        </select>
+      </div>
+    </div>
+    <div class="fila-campos">
+      <div class="campo" style="flex:1; min-width:140px;">
         <label>Color de texto</label>
         <input type="color" data-campo="colorTexto" value="${escaparAtributo(d.colorTexto || "#1e2226")}" />
       </div>
-      <div class="campo" style="flex:1; min-width:180px;">
+      <div class="campo" style="flex:1; min-width:140px;">
         <label>Color de fondo</label>
         <input type="color" data-campo="colorFondo" value="${escaparAtributo(d.colorFondo || "#f6f3ec")}" />
       </div>
-      <div class="campo" style="flex:1; min-width:180px;">
+      <div class="campo" style="flex:1; min-width:140px;">
         <label>Color de borde</label>
         <input type="color" data-campo="colorBorde" value="${escaparAtributo(d.colorBorde || "#1c3a54")}" />
+      </div>
+      <div class="campo" style="flex:1; min-width:100px;">
+        <label>Borde grosor</label>
+        <select data-campo="bordeAncho">
+          <option value="0" ${d.bordeAncho === "0" || !d.bordeAncho ? "selected" : ""}>0px</option>
+          <option value="1" ${d.bordeAncho === "1" ? "selected" : ""}>1px</option>
+          <option value="2" ${d.bordeAncho === "2" ? "selected" : ""}>2px</option>
+          <option value="3" ${d.bordeAncho === "3" ? "selected" : ""}>3px</option>
+        </select>
+      </div>
+      <div class="campo" style="flex:1; min-width:100px;">
+        <label>Radio</label>
+        <select data-campo="bordeRadio">
+          <option value="0" ${d.bordeRadio === "0" || !d.bordeRadio ? "selected" : ""}>0px</option>
+          <option value="8" ${d.bordeRadio === "8" ? "selected" : ""}>8px</option>
+          <option value="16" ${d.bordeRadio === "16" ? "selected" : ""}>16px</option>
+          <option value="24" ${d.bordeRadio === "24" ? "selected" : ""}>24px</option>
+        </select>
       </div>
     </div>`;
 }
@@ -986,6 +1323,8 @@ function enlazarEventosDeBloques(paginaId) {
           moverBloque(paginaId, bloqueId, "arriba");
         } else if (accion === "bajar") {
           moverBloque(paginaId, bloqueId, "abajo");
+        } else if (accion === "duplicar") {
+          duplicarBloque(paginaId, bloqueId);
         }
         renderizarEditor();
       });
@@ -1090,6 +1429,35 @@ function enlazarEventosDeBloques(paginaId) {
       }
     }
   });
+}
+
+async function abrirModalSEOPagina(proyectoId, paginaId) {
+  const res = buscarPaginaPorId(paginaId);
+  if (!res || !res.pagina) return;
+  const { pagina } = res;
+  
+  const valores = await solicitarFormularioModal({
+    titulo: `Configuración SEO - ${pagina.titulo}`,
+    textoConfirmar: "Guardar SEO",
+    campos: [
+      { nombre: "seoTitulo", etiqueta: "Título SEO (Meta Title)", valor: pagina.seoTitulo || "" },
+      { nombre: "seoDescripcion", etiqueta: "Descripción (Meta Description)", tipo: "textarea", valor: pagina.seoDescripcion || "" },
+      { nombre: "seoPalabrasClave", etiqueta: "Palabras clave (Keywords)", valor: pagina.seoPalabrasClave || "" },
+      { nombre: "seoImagen", etiqueta: "URL de la imagen (Meta Image)", valor: pagina.seoImagen || "" }
+    ]
+  });
+
+  if (!valores) return; // Cancelado
+
+  actualizarPaginaDeProyecto(proyectoId, paginaId, {
+    seoTitulo: valores.seoTitulo,
+    seoDescripcion: valores.seoDescripcion,
+    seoPalabrasClave: valores.seoPalabrasClave,
+    seoImagen: valores.seoImagen
+  });
+  
+  mostrarToast("Configuración SEO guardada correctamente.", "success");
+  renderizarBarraLateral();
 }
 
 window.addEventListener("DOMContentLoaded", iniciar);

@@ -1,4 +1,4 @@
-# AutoPag — creador de sitios autogestionables
+# AutoPag — Creador de sitios web
 
 AutoPag es un constructor de sitios estático hecho con HTML, CSS y JavaScript puro. Permite crear varios proyectos, diseñar sus páginas con bloques y publicar una vista navegable sin escribir HTML para cada página.
 

@@ -164,19 +164,31 @@ function obtenerClaseTamano(datos) {
   }
 }
 
+function obtenerClasesEstiloBloque(datos) {
+  const clases = [];
+  if (datos.espaciado && datos.espaciado !== "normal") clases.push(`bloque-wrapper--espaciado-${datos.espaciado}`);
+  if (datos.alineacion && datos.alineacion !== "izquierda") clases.push(`bloque-wrapper--alinear-${datos.alineacion}`);
+  if (datos.bordeAncho && datos.bordeAncho !== "0") clases.push(`bloque-wrapper--borde-${datos.bordeAncho}`);
+  if (datos.bordeRadio && datos.bordeRadio !== "0") clases.push(`bloque-wrapper--radio-${datos.bordeRadio}`);
+  return clases;
+}
+
 function obtenerEstilosBloque(datos) {
   const estilos = [];
   if (datos.colorTexto) estilos.push(`color:${datos.colorTexto}`);
   if (datos.colorFondo) estilos.push(`background-color:${datos.colorFondo}`);
   if (datos.colorBorde) estilos.push(`border-color:${datos.colorBorde}`);
+  if (datos.bordeAncho && datos.bordeAncho !== "0") estilos.push(`border-width:${datos.bordeAncho}px`);
+  if (datos.bordeRadio && datos.bordeRadio !== "0") estilos.push(`border-radius:${datos.bordeRadio}px`);
   return estilos.join(";");
 }
 
 function envolverBloque(contenido, bloque) {
   const d = bloque.datos || {};
-  const clases = ["bloque-wrapper", obtenerClaseTamano(d)].filter(Boolean);
+  const clases = ["bloque-wrapper", obtenerClaseTamano(d), ...obtenerClasesEstiloBloque(d)].filter(Boolean);
   const estilos = obtenerEstilosBloque(d);
-  return `<div class="${clases.join(" ")}"${estilos ? ` style="${estilos}"` : ""}>${contenido}</div>`;
+  const bordeStyle = d.bordeAncho && d.bordeAncho !== "0" ? " border-style:solid;" : "";
+  return `<div class="${clases.join(" ")}"${estilos || bordeStyle ? ` style="${estilos}${bordeStyle}"` : ""}>${contenido}</div>`;
 }
 
 function renderizarBloqueCita(d) {
@@ -249,8 +261,9 @@ function renderizarBloqueSeccion(d) {
 
 function renderizarBloqueColumnas(d) {
   const columnas = Array.isArray(d.columnas) ? d.columnas : [];
+  const num = Math.min(4, Math.max(2, Number(d.numColumnas) || columnas.length || 2));
   const cols = columnas.map((col) => `<div class="bloque-columnas__col">${escaparHtml(col || "")}</div>`).join("");
-  return `<div class="bloque-columnas">${cols}</div>`;
+  return `<div class="bloque-columnas bloque-columnas--${num}">${cols}</div>`;
 }
 
 function renderizarBloque(bloque) {
@@ -322,14 +335,16 @@ function renderizarBloque(bloque) {
 
 function renderizarPagina(pagina) {
   if (!pagina) {
-    return `<div class="estado-vacio">
+    return `<div class="estado-vacio estado-vacio--ilustrado">
+      <div class="estado-vacio__icono" aria-hidden="true">🔍</div>
       <h2>Esta página no existe</h2>
-      <p>Puede que el enlace esté mal escrito o que la página se haya borrado.</p>
+      <p>Puede que el enlace esté mal escrito, que la página esté en borrador o que se haya eliminado.</p>
     </div>`;
   }
   const bloques = [...pagina.bloques].sort((a, b) => a.orden - b.orden);
   if (bloques.length === 0) {
-    return `<div class="estado-vacio">
+    return `<div class="estado-vacio estado-vacio--ilustrado">
+      <div class="estado-vacio__icono" aria-hidden="true">📄</div>
       <h2>${escaparHtml(pagina.titulo)}</h2>
       <p>Todavía no hay contenido en esta página. Agrégalo desde el panel de administración.</p>
     </div>`;

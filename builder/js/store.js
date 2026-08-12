@@ -7,11 +7,20 @@
    guarda aquí, y el sitio público lee de aquí para dibujarse.
    ============================================================ */
 
-const CLAVE_ALMACEN = "miniwix_datos_v1";
-const CLAVE_BACKUP_PREFIX = "miniwix_backup_v1_";
+const CLAVE_ALMACEN = "autopag_datos_v1";
+const CLAVE_BACKUP_PREFIX = "autopag_backup_v1_";
+const CLAVE_HISTORIAL = "autopag_historial_v1";
+const CLAVE_BIBLIOTECA = "autopag_biblioteca_v1";
 const MAX_BACKUPS = 2;
+const MAX_HISTORIAL = 25;
+const MAX_BIBLIOTECA = 30;
 const MAX_BYTES_DATOS = 1_500_000;
 const MAX_BYTES_IMAGEN = 700 * 1024;
+const ESPACIADOS_BLOQUE = new Set(["compacto", "normal", "amplio"]);
+const ALINEACIONES_BLOQUE = new Set(["izquierda", "centro", "derecha"]);
+const BORDE_ANCHOS = new Set(["0", "1", "2", "3"]);
+const BORDE_RADIOS = new Set(["0", "8", "16", "24"]);
+let _omitirHistorial = false;
 
 const ESQUEMAS_URL_PERMITIDOS = [
   "http://",
@@ -60,6 +69,17 @@ function limitarTexto(valor, maximo = 5000) {
   return typeof valor === "string" ? valor.slice(0, maximo) : valor;
 }
 
+function sanitizarEstiloBloque(d) {
+  if (d.espaciado !== undefined && !ESPACIADOS_BLOQUE.has(d.espaciado)) delete d.espaciado;
+  if (d.alineacion !== undefined && !ALINEACIONES_BLOQUE.has(d.alineacion)) delete d.alineacion;
+  if (d.bordeAncho !== undefined && !BORDE_ANCHOS.has(String(d.bordeAncho))) delete d.bordeAncho;
+  if (d.bordeRadio !== undefined && !BORDE_RADIOS.has(String(d.bordeRadio))) delete d.bordeRadio;
+  if (d.numColumnas !== undefined) {
+    const n = Number(d.numColumnas);
+    d.numColumnas = String(Math.min(4, Math.max(2, Number.isFinite(n) ? n : 2)));
+  }
+}
+
 function sanitizarBloqueRecursivo(bloque) {
   const b = { ...bloque };
   b.datos = b.datos ? { ...b.datos } : {};
@@ -71,6 +91,7 @@ function sanitizarBloqueRecursivo(bloque) {
   ["colorTexto", "colorFondo", "colorBorde"].forEach((campo) => {
     if (d[campo] !== undefined) d[campo] = sanitizarColor(d[campo]);
   });
+  sanitizarEstiloBloque(d);
   if (Array.isArray(d.items)) {
     d.items = d.items.map((item) => {
       if (typeof item === "string") return item;
@@ -92,7 +113,7 @@ function sanitizarBloqueRecursivo(bloque) {
 function configPorDefecto() {
   return {
     nombreSitio: "Mi Sitio",
-    sloganSitio: "Construido con el editor autogestionable",
+    sloganSitio: "Construido con AutoPag",
     paginaInicioSlug: "inicio",
     colorPrincipal: "#1c3a54",
     colorAcento: "#e8631c",
@@ -103,8 +124,74 @@ function configPorDefecto() {
     anchoContenido: "780",
     footerTexto: "Editable desde",
     footerEnlace: "admin.html",
+    plantillaVisual: "clasico",
+    seoTitulo: "",
+    seoDescripcion: "",
+    seoImagen: "",
+    seoPalabrasClave: "",
   };
 }
+
+const CONFIGS_PLANTILLA_VISUAL = {
+  clasico: {},
+  portafolio: {
+    nombreSitio: "Estudio Creativo",
+    sloganSitio: "Diseño, identidad y experiencias digitales",
+    colorPrincipal: "#0f1419",
+    colorAcento: "#d4a853",
+    colorFondo: "#111820",
+    colorTexto: "#eef2f6",
+    fuenteCabecera: "Space Grotesk",
+    fuenteCuerpo: "Inter",
+    anchoContenido: "920",
+    plantillaVisual: "portafolio",
+  },
+  restaurante: {
+    nombreSitio: "La Mesa Dorada",
+    sloganSitio: "Cocina de temporada · reservas online",
+    colorPrincipal: "#4a1c28",
+    colorAcento: "#c8922a",
+    colorFondo: "#faf4eb",
+    colorTexto: "#2a1810",
+    fuenteCabecera: "Space Grotesk",
+    fuenteCuerpo: "Inter",
+    anchoContenido: "820",
+    plantillaVisual: "restaurante",
+  },
+  empresa: {
+    nombreSitio: "Nova Consulting",
+    sloganSitio: "Estrategia, tecnología y crecimiento sostenible",
+    colorPrincipal: "#1a3a5c",
+    colorAcento: "#2b7de9",
+    colorFondo: "#f4f7fb",
+    colorTexto: "#1a2332",
+    fuenteCabecera: "Space Grotesk",
+    fuenteCuerpo: "Inter",
+    anchoContenido: "860",
+    plantillaVisual: "empresa",
+  },
+  producto: {
+    nombreSitio: "FlowDesk",
+    sloganSitio: "Automatiza tu trabajo en minutos, no en meses",
+    colorPrincipal: "#2d1b69",
+    colorAcento: "#7c3aed",
+    colorFondo: "#f8f6ff",
+    colorTexto: "#1e1633",
+    fuenteCabecera: "Space Grotesk",
+    fuenteCuerpo: "Inter",
+    anchoContenido: "900",
+    plantillaVisual: "producto",
+  },
+  landing: {
+    nombreSitio: "Lanzamiento",
+    sloganSitio: "Convierte visitas en clientes",
+    colorPrincipal: "#1c3a54",
+    colorAcento: "#e8631c",
+    colorFondo: "#f6f3ec",
+    colorTexto: "#1e2226",
+    plantillaVisual: "landing",
+  },
+};
 
 function normalizarConfig(config) {
   const base = configPorDefecto();
@@ -123,7 +210,18 @@ function normalizarConfig(config) {
     anchoContenido: String(Number.isFinite(ancho) ? Math.min(1200, Math.max(500, ancho)) : Number(base.anchoContenido)),
     footerTexto: limitarTexto(entrada.footerTexto || base.footerTexto, 160),
     footerEnlace: sanitizarUrl(limitarTexto(entrada.footerEnlace || base.footerEnlace, 500)),
+    plantillaVisual: ["clasico", "portafolio", "restaurante", "empresa", "producto", "landing"].includes(entrada.plantillaVisual)
+      ? entrada.plantillaVisual
+      : base.plantillaVisual,
+    seoTitulo: limitarTexto(entrada.seoTitulo || base.seoTitulo, 120),
+    seoDescripcion: limitarTexto(entrada.seoDescripcion || base.seoDescripcion, 320),
+    seoImagen: sanitizarUrl(limitarTexto(entrada.seoImagen || base.seoImagen, 500)),
+    seoPalabrasClave: limitarTexto(entrada.seoPalabrasClave || base.seoPalabrasClave, 200),
   };
+}
+
+function normalizarEstadoPublicacion(valor) {
+  return valor === "borrador" ? "borrador" : "publicado";
 }
 
 function datosPorDefecto() {
@@ -173,12 +271,14 @@ function normalizarProyecto(proyecto, configHereda) {
     id: origen.id || generarId(),
     titulo: limitarTexto(origen.titulo || "Proyecto", 100),
     slug: generarSlug(origen.slug || origen.titulo || "proyecto") || "proyecto",
+    estadoPublicacion: normalizarEstadoPublicacion(origen.estadoPublicacion),
     config: normalizarConfig({ ...(configHereda || {}), ...(origen.config || {}) }),
     paginas: paginas.map((pagina) => ({
       ...pagina,
       id: pagina.id || generarId(),
       titulo: limitarTexto(pagina.titulo || "Página", 100),
       slug: generarSlug(pagina.slug || pagina.titulo || "pagina") || "pagina",
+      estadoPublicacion: normalizarEstadoPublicacion(pagina.estadoPublicacion),
       bloques: Array.isArray(pagina.bloques) ? pagina.bloques.map(sanitizarBloqueRecursivo) : [],
     })),
   };
@@ -293,7 +393,65 @@ function usoAlmacenamiento() {
   }
 }
 
-function guardarDatos(datos) {
+function obtenerHistorial() {
+  try {
+    const crudo = localStorage.getItem(CLAVE_HISTORIAL);
+    return crudo ? JSON.parse(crudo) : [];
+  } catch {
+    return [];
+  }
+}
+
+function guardarHistorial(pila) {
+  try {
+    localStorage.setItem(CLAVE_HISTORIAL, JSON.stringify(pila.slice(0, MAX_HISTORIAL)));
+  } catch (e) {
+    console.warn("No se pudo guardar historial:", e);
+  }
+}
+
+function registrarEnHistorial(etiqueta) {
+  if (_omitirHistorial) return;
+  try {
+    const actual = localStorage.getItem(CLAVE_ALMACEN);
+    if (!actual) return;
+    const pila = obtenerHistorial();
+    pila.unshift({ datos: actual, etiqueta: etiqueta || "Cambio", fecha: Date.now() });
+    guardarHistorial(pila);
+  } catch (e) {
+    console.warn("No se pudo registrar historial:", e);
+  }
+}
+
+function puedeDeshacer() {
+  return obtenerHistorial().length > 0;
+}
+
+function deshacerUltimoCambio() {
+  const pila = obtenerHistorial();
+  if (!pila.length) throw new Error("No hay cambios para deshacer.");
+  const [ultimo, ...resto] = pila;
+  _omitirHistorial = true;
+  try {
+    localStorage.setItem(CLAVE_ALMACEN, ultimo.datos);
+    guardarHistorial(resto);
+  } finally {
+    _omitirHistorial = false;
+  }
+  return { datos: obtenerDatos(), etiqueta: ultimo.etiqueta };
+}
+
+function listarEntradasHistorial() {
+  return obtenerHistorial().map((item, i) => ({
+    indice: i,
+    etiqueta: item.etiqueta,
+    fecha: item.fecha,
+  }));
+}
+
+function guardarDatos(datos, opciones) {
+  const opts = opciones || {};
+  if (!opts.sinHistorial) registrarEnHistorial(opts.etiqueta);
   const normalizados = normalizarDatos(datos);
   const serializado = JSON.stringify(normalizados);
   if (serializado.length > MAX_BYTES_DATOS) {
@@ -431,6 +589,16 @@ function listarProyectos() {
   return obtenerDatos().proyectos;
 }
 
+function listarProyectosPublicos() {
+  return listarProyectos().filter((p) => p.estadoPublicacion !== "borrador");
+}
+
+function listarPaginasPublicasDeProyecto(proyectoId) {
+  const proyecto = obtenerProyectoPorId(proyectoId);
+  if (!proyecto) return [];
+  return (proyecto.paginas || []).filter((p) => p.estadoPublicacion !== "borrador");
+}
+
 function obtenerProyectoPorSlug(slug) {
   return obtenerDatos().proyectos.find((p) => p.slug === slug) || null;
 }
@@ -439,19 +607,50 @@ function obtenerProyectoPorId(id) {
   return obtenerDatos().proyectos.find((p) => p.id === id) || null;
 }
 
-function crearProyecto(titulo) {
+function crearProyecto(titulo, opciones) {
+  const opts = opciones || {};
   const datos = obtenerDatos();
-  let slugBase = generarSlug(titulo) || "proyecto";
+  let slugBase = generarSlug(opts.slug || titulo) || "proyecto";
   let slug = slugBase;
   let contador = 2;
   while (datos.proyectos.some((p) => p.slug === slug)) {
     slug = `${slugBase}-${contador}`;
     contador++;
   }
-  const nuevo = { id: generarId(), titulo, slug, config: configPorDefecto(), paginas: [] };
+  const plantilla = opts.plantilla || "vacia";
+  const configBase = normalizarConfig({
+    ...configPorDefecto(),
+    ...(CONFIGS_PLANTILLA_VISUAL[plantilla] || {}),
+  });
+  const nuevo = {
+    id: generarId(),
+    titulo,
+    slug,
+    estadoPublicacion: opts.estadoPublicacion === "borrador" ? "borrador" : "publicado",
+    config: configBase,
+    paginas: [],
+  };
   datos.proyectos.push(nuevo);
-  guardarDatos(datos);
-  return nuevo;
+  guardarDatos(datos, { etiqueta: "Crear proyecto" });
+
+  if (plantilla !== "vacia") {
+    poblarProyectoConPlantilla(nuevo.id, plantilla);
+    return obtenerProyectoPorId(nuevo.id);
+  }
+
+  const pagina = crearPaginaEnProyecto(nuevo.id, "Inicio", { sinHistorial: true });
+  if (pagina) {
+    agregarBloque(pagina.id, "titulo");
+    const bloques = obtenerPaginaPorId(pagina.id)?.bloques || [];
+    if (bloques[0]) {
+      actualizarBloque(pagina.id, bloques[0].id, {
+        texto: "Bienvenido a tu nuevo proyecto",
+        nivel: "h1",
+      });
+    }
+    agregarBloque(pagina.id, "parrafo");
+  }
+  return obtenerProyectoPorId(nuevo.id);
 }
 
 function actualizarProyecto(id, cambios) {
@@ -520,20 +719,27 @@ function obtenerPaginaPorIdEnProyecto(id, proyectoId) {
   return proyecto ? proyecto.paginas.find((p) => p.id === id) || null : null;
 }
 
-function crearPaginaEnProyecto(proyectoId, titulo) {
+function crearPaginaEnProyecto(proyectoId, titulo, opciones) {
+  const opts = opciones || {};
   const datos = obtenerDatos();
   const proyecto = datos.proyectos.find((p) => p.id === proyectoId);
   if (!proyecto) return null;
-  let slugBase = generarSlug(titulo) || "pagina";
+  let slugBase = generarSlug(opts.slug || titulo) || "pagina";
   let slug = slugBase;
   let contador = 2;
   while (proyecto.paginas.some((p) => p.slug === slug)) {
     slug = `${slugBase}-${contador}`;
     contador++;
   }
-  const nueva = { id: generarId(), titulo, slug, bloques: [] };
+  const nueva = {
+    id: generarId(),
+    titulo,
+    slug,
+    estadoPublicacion: opts.estadoPublicacion === "borrador" ? "borrador" : "publicado",
+    bloques: [],
+  };
   proyecto.paginas.push(nueva);
-  guardarDatos(datos);
+  guardarDatos(datos, { etiqueta: "Crear página", sinHistorial: !!opts.sinHistorial });
   return nueva;
 }
 
@@ -579,28 +785,108 @@ function agregarBloque(paginaId, tipo) {
 function bloquesPorPlantilla(plantilla) {
   const plantillaNormalizada = plantilla || "vacia";
   switch (plantillaNormalizada) {
+    case "portafolio":
+      return [
+        { tipo: "hero", datos: { titulo: "Diseño con propósito", descripcion: "Ayudo a marcas ambiciosas a contar historias visuales memorables.", botonTexto: "Ver proyectos", botonEnlace: "#", alineacion: "izquierda", espaciado: "amplio" } },
+        { tipo: "galeria", datos: { items: ["https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800", "https://images.unsplash.com/photo-1561070791-2526d30994b5?w=800", "https://images.unsplash.com/photo-1558655146-d09347e92766?w=800"], espaciado: "normal" } },
+        { tipo: "cards", datos: { items: [{ titulo: "Branding", descripcion: "Identidad visual completa para startups.", enlace: "#" }, { titulo: "UI/UX", descripcion: "Interfaces claras orientadas a conversión.", enlace: "#" }, { titulo: "Motion", descripcion: "Animación y microinteracciones.", enlace: "#" }] } },
+        { tipo: "testimonios", datos: { items: [{ texto: "Transformó nuestra presencia digital por completo.", autor: "Laura M. · Directora de marketing" }] } },
+        { tipo: "contacto", datos: { titulo: "¿Tienes un proyecto?", descripcion: "Cuéntame tu idea y te respondo en 48 h.", boton: "Enviar mensaje" } },
+      ];
+    case "restaurante":
+      return [
+        { tipo: "hero", datos: { titulo: "Sabores de temporada", descripcion: "Producto local, fuego lento y una carta que cambia cada mes.", botonTexto: "Reservar mesa", botonEnlace: "#", colorFondo: "#faf4eb" } },
+        { tipo: "cards", datos: { items: [{ titulo: "Entrantes", descripcion: "Burrata, tomate confitado y albahaca.", enlace: "#" }, { titulo: "Principales", descripcion: "Lubina a la brasa con verduras.", enlace: "#" }, { titulo: "Postres", descripcion: "Tarta de queso horneada.", enlace: "#" }], alineacion: "centro" } },
+        { tipo: "columnas", datos: { columnas: ["Martes a jueves · 13:00–16:00 y 20:00–23:30", "Viernes y sábado · servicio continuo", "Domingo · brunch 11:00–15:00"], numColumnas: "3" } },
+        { tipo: "faq", datos: { items: [{ pregunta: "¿Aceptáis reservas para grupos?", respuesta: "Sí, hasta 12 personas con menú degustación." }, { pregunta: "¿Opciones vegetarianas?", respuesta: "Siempre hay platos sin carne en carta." }] } },
+        { tipo: "contacto", datos: { titulo: "Reserva o consulta", descripcion: "Indícanos fecha, hora y número de comensales.", boton: "Solicitar reserva" } },
+      ];
+    case "producto":
+      return [
+        { tipo: "hero", datos: { titulo: "Tu equipo, sincronizado", descripcion: "FlowDesk centraliza tareas, clientes y facturación en un solo panel intuitivo.", botonTexto: "Probar gratis", botonEnlace: "#", espaciado: "amplio" } },
+        { tipo: "cards", datos: { items: [{ titulo: "Automatiza", descripcion: "Flujos repetitivos en un clic.", enlace: "#" }, { titulo: "Colabora", descripcion: "Comentarios y permisos granulares.", enlace: "#" }, { titulo: "Mide", descripcion: "Dashboards en tiempo real.", enlace: "#" }] } },
+        { tipo: "lista", datos: { items: ["Plan gratuito para equipos pequeños", "Integraciones con Slack, Notion y Gmail", "Exportación CSV y API REST"] } },
+        { tipo: "testimonios", datos: { items: [{ texto: "Reducimos el tiempo administrativo un 40%.", autor: "Carlos R. · COO" }] } },
+        { tipo: "faq", datos: { items: [{ pregunta: "¿Hay prueba gratuita?", respuesta: "14 días sin tarjeta de crédito." }] } },
+        { tipo: "contacto", datos: { titulo: "Solicita una demo", descripcion: "Te mostramos el producto en 20 minutos.", boton: "Agendar demo" } },
+      ];
     case "landing":
       return [
-        { tipo: "hero", datos: { titulo: "Tu propuesta en una frase", descripcion: "Describe tu producto o servicio aquí", botonTexto: "Conocer más", botonEnlace: "#" } },
-        { tipo: "cards", datos: { items: [{ titulo: "Servicio 1", descripcion: "Descripción breve", enlace: "#" }, { titulo: "Servicio 2", descripcion: "Otra propuesta", enlace: "#" }] } },
-        { tipo: "testimonios", datos: { items: [{ texto: "Excelente trabajo, muy recomendable.", autor: "Cliente satisfecho" }] } },
-        { tipo: "contacto", datos: { titulo: "Contáctanos", descripcion: "Escríbenos y te responderemos pronto", boton: "Enviar" } },
+        { tipo: "hero", datos: { titulo: "Lanza tu idea esta semana", descripcion: "Plantilla optimizada para captar leads y explicar tu propuesta en segundos.", botonTexto: "Empezar ahora", botonEnlace: "#", espaciado: "amplio" } },
+        { tipo: "cards", datos: { items: [{ titulo: "Rápido", descripcion: "Publica sin escribir código.", enlace: "#" }, { titulo: "Flexible", descripcion: "Bloques listos para personalizar.", enlace: "#" }, { titulo: "Portable", descripcion: "Exporta tu sitio cuando quieras.", enlace: "#" }] } },
+        { tipo: "testimonios", datos: { items: [{ texto: "Montamos la landing en una tarde.", autor: "Equipo fundador" }] } },
+        { tipo: "contacto", datos: { titulo: "Únete a la lista", descripcion: "Déjanos tu email y te avisamos del lanzamiento.", boton: "Enviar" } },
       ];
     case "empresa":
       return [
-        { tipo: "titulo", datos: { texto: "Sobre nosotros", nivel: "h2" } },
-        { tipo: "parrafo", datos: { texto: "Somos un equipo que crea experiencias digitales claras, modernas y útiles." } },
-        { tipo: "cards", datos: { items: [{ titulo: "Diseño", descripcion: "Interfaces limpias y funcionales.", enlace: "#" }, { titulo: "Desarrollo", descripcion: "Experiencias rápidas y fiables.", enlace: "#" }] } },
-        { tipo: "faq", datos: { items: [{ pregunta: "¿Trabajáis con empresas?", respuesta: "Sí, también atendemos proyectos corporativos." }] } },
+        { tipo: "hero", datos: { titulo: "Consultoría que impulsa resultados", descripcion: "Acompañamos a empresas en transformación digital, procesos y cultura de producto.", botonTexto: "Conocer servicios", botonEnlace: "#" } },
+        { tipo: "parrafo", datos: { texto: "Más de 10 años ayudando a equipos a escalar con claridad estratégica y ejecución ágil." } },
+        { tipo: "cards", datos: { items: [{ titulo: "Estrategia", descripcion: "Roadmaps y OKRs alineados al negocio.", enlace: "#" }, { titulo: "Operaciones", descripcion: "Procesos medibles y equipos autónomos.", enlace: "#" }, { titulo: "Tecnología", descripcion: "Arquitectura y selección de herramientas.", enlace: "#" }] } },
+        { tipo: "cita", datos: { texto: "La claridad es la ventaja competitiva del siglo XXI.", autor: "Nova Consulting" } },
+        { tipo: "faq", datos: { items: [{ pregunta: "¿Trabajáis con pymes?", respuesta: "Sí, desde 5 hasta 500 empleados." }, { pregunta: "¿Modalidad remota?", respuesta: "100% remoto con sesiones presenciales opcionales." }] } },
+        { tipo: "contacto", datos: { titulo: "Hablemos de tu reto", descripcion: "Agenda una llamada de descubrimiento sin compromiso.", boton: "Contactar" } },
       ];
     case "contacto":
       return [
-        { tipo: "hero", datos: { titulo: "Hablemos", descripcion: "Estamos listos para ayudarte con tu próximo proyecto.", botonTexto: "Enviar mensaje", botonEnlace: "#" } },
-        { tipo: "contacto", datos: { titulo: "Formulario de contacto", descripcion: "Escríbenos y te responderemos lo antes posible.", boton: "Enviar" } },
+        { tipo: "hero", datos: { titulo: "Estamos aquí para ayudarte", descripcion: "Escríbenos y un miembro del equipo te responderá en menos de 24 horas.", botonTexto: "Ir al formulario", botonEnlace: "#" } },
+        { tipo: "columnas", datos: { columnas: ["📍 Calle Ejemplo 12, Madrid", "📞 +34 600 000 000", "✉️ hola@ejemplo.com"], numColumnas: "3" } },
+        { tipo: "contacto", datos: { titulo: "Formulario de contacto", descripcion: "Cuéntanos en qué podemos ayudarte.", boton: "Enviar mensaje" } },
       ];
     default:
       return [];
   }
+}
+
+function estructuraPaginasPorPlantilla(plantilla) {
+  switch (plantilla) {
+    case "portafolio":
+      return [{ titulo: "Inicio", slug: "inicio" }, { titulo: "Proyectos", slug: "proyectos" }, { titulo: "Contacto", slug: "contacto" }];
+    case "restaurante":
+      return [{ titulo: "Inicio", slug: "inicio" }, { titulo: "Carta", slug: "carta" }, { titulo: "Reservas", slug: "reservas" }];
+    case "empresa":
+      return [{ titulo: "Inicio", slug: "inicio" }, { titulo: "Servicios", slug: "servicios" }, { titulo: "Contacto", slug: "contacto" }];
+    case "producto":
+      return [{ titulo: "Inicio", slug: "inicio" }, { titulo: "Precios", slug: "precios" }, { titulo: "Demo", slug: "demo" }];
+    case "landing":
+    case "contacto":
+      return [{ titulo: "Inicio", slug: "inicio" }];
+    default:
+      return [{ titulo: "Inicio", slug: "inicio" }];
+  }
+}
+
+function poblarProyectoConPlantilla(proyectoId, plantilla) {
+  const datos = obtenerDatos();
+  const proyecto = datos.proyectos.find((p) => p.id === proyectoId);
+  if (!proyecto) return null;
+  const paginasDef = estructuraPaginasPorPlantilla(plantilla);
+  proyecto.paginas = paginasDef.map((def, pi) => {
+    const bloquesTpl = pi === 0 ? bloquesPorPlantilla(plantilla) : bloquesPorPlantilla(plantilla === "contacto" ? "contacto" : "vacia");
+    const bloques = (pi === 0 ? bloquesTpl : pi === paginasDef.length - 1 && plantilla !== "landing" ? bloquesPorPlantilla("contacto") : []).map((bloque, index) => ({
+      id: generarId(),
+      tipo: bloque.tipo,
+      orden: index,
+      datos: sanitizarBloqueRecursivo({ datos: { ...datosVaciosParaTipo(bloque.tipo), ...bloque.datos } }).datos,
+    }));
+    return {
+      id: generarId(),
+      titulo: def.titulo,
+      slug: def.slug,
+      estadoPublicacion: "publicado",
+      bloques,
+    };
+  });
+  if (proyecto.paginas[0]) {
+    proyecto.config = normalizarConfig({
+      ...proyecto.config,
+      ...(CONFIGS_PLANTILLA_VISUAL[plantilla] || {}),
+      paginaInicioSlug: proyecto.paginas[0].slug,
+      seoTitulo: proyecto.config.nombreSitio,
+      seoDescripcion: proyecto.config.sloganSitio,
+    });
+  }
+  guardarDatos(datos, { etiqueta: `Plantilla ${plantilla}` });
+  return proyecto;
 }
 
 function datosVaciosParaTipo(tipo) {
@@ -624,7 +910,7 @@ function datosVaciosParaTipo(tipo) {
     case "contacto":
       return { titulo: "Contáctanos", descripcion: "Escríbenos y te responderemos pronto", email: "", boton: "Enviar" };
     case "cita":
-      return { texto: "Un gran diseño comienza con una idea clara.", autor: "Equipo Mini Wix" };
+      return { texto: "Un gran diseño comienza con una idea clara.", autor: "Equipo AutoPag" };
     case "hero":
       return { titulo: "Tu propuesta en una frase", descripcion: "Describe tu producto o servicio aquí", botonTexto: "Conocer más", botonEnlace: "#", imagen: "", alt: "" };
     case "cards":
@@ -712,6 +998,134 @@ function reordenarBloque(paginaId, bloqueId, bloqueReferenciaId) {
   return pagina.bloques;
 }
 
+function regenerarIdsEnPagina(pagina) {
+  return {
+    ...pagina,
+    id: generarId(),
+    bloques: (pagina.bloques || []).map((bloque) => ({
+      ...bloque,
+      id: generarId(),
+      datos: bloque.datos ? { ...bloque.datos } : {},
+    })),
+  };
+}
+
+function slugUnicoProyecto(base, datos, excluirId) {
+  let slug = base;
+  let contador = 2;
+  while (datos.proyectos.some((item) => item.id !== excluirId && item.slug === slug)) slug = `${base}-${contador++}`;
+  return slug;
+}
+
+function slugUnicoPagina(base, paginas, excluirId) {
+  let slug = base;
+  let contador = 2;
+  while (paginas.some((item) => item.id !== excluirId && item.slug === slug)) slug = `${base}-${contador++}`;
+  return slug;
+}
+
+function duplicarProyecto(id) {
+  const datos = obtenerDatos();
+  const origen = datos.proyectos.find((p) => p.id === id);
+  if (!origen) return null;
+  const copia = JSON.parse(JSON.stringify(origen));
+  copia.id = generarId();
+  copia.titulo = `${origen.titulo} (copia)`;
+  copia.slug = slugUnicoProyecto(generarSlug(`${origen.slug}-copia`) || "proyecto-copia", datos);
+  copia.estadoPublicacion = "borrador";
+  const paginasCopia = (copia.paginas || []).map((pagina) => {
+    const nueva = regenerarIdsEnPagina(pagina);
+    nueva.estadoPublicacion = "borrador";
+    nueva.titulo = `${pagina.titulo} (copia)`;
+    return nueva;
+  });
+  paginasCopia.forEach((pagina, i) => {
+    const base = generarSlug(`${origen.paginas[i].slug}-copia`) || "pagina-copia";
+    pagina.slug = slugUnicoPagina(base, paginasCopia, pagina.id);
+  });
+  copia.paginas = paginasCopia;
+  datos.proyectos.push(copia);
+  guardarDatos(datos, { etiqueta: "Duplicar proyecto" });
+  return copia;
+}
+
+function duplicarPaginaEnProyecto(proyectoId, paginaId) {
+  const datos = obtenerDatos();
+  const proyecto = datos.proyectos.find((p) => p.id === proyectoId);
+  if (!proyecto) return null;
+  const origen = proyecto.paginas.find((p) => p.id === paginaId);
+  if (!origen) return null;
+  const copia = regenerarIdsEnPagina(JSON.parse(JSON.stringify(origen)));
+  copia.titulo = `${origen.titulo} (copia)`;
+  copia.slug = slugUnicoPagina(generarSlug(`${origen.slug}-copia`) || "pagina-copia", proyecto.paginas);
+  copia.estadoPublicacion = "borrador";
+  proyecto.paginas.push(copia);
+  guardarDatos(datos, { etiqueta: "Duplicar página" });
+  return copia;
+}
+
+function duplicarBloque(paginaId, bloqueId) {
+  const datos = obtenerDatos();
+  const { pagina } = buscarPaginaPorId(paginaId, datos);
+  if (!pagina) return null;
+  const origen = pagina.bloques.find((b) => b.id === bloqueId);
+  if (!origen) return null;
+  const copia = sanitizarBloqueRecursivo({
+    id: generarId(),
+    tipo: origen.tipo,
+    orden: pagina.bloques.length,
+    datos: JSON.parse(JSON.stringify(origen.datos || {})),
+  });
+  pagina.bloques.push(copia);
+  pagina.bloques.forEach((b, i) => (b.orden = i));
+  guardarDatos(datos, { etiqueta: "Duplicar bloque" });
+  return copia;
+}
+
+function cambiarEstadoProyecto(id, estado) {
+  const datos = obtenerDatos();
+  const proyecto = datos.proyectos.find((p) => p.id === id);
+  if (!proyecto) return null;
+  proyecto.estadoPublicacion = normalizarEstadoPublicacion(estado);
+  guardarDatos(datos, { etiqueta: "Estado del proyecto" });
+  return proyecto;
+}
+
+function cambiarEstadoPagina(proyectoId, paginaId, estado) {
+  const datos = obtenerDatos();
+  const proyecto = datos.proyectos.find((p) => p.id === proyectoId);
+  if (!proyecto) return null;
+  const pagina = proyecto.paginas.find((p) => p.id === paginaId);
+  if (!pagina) return null;
+  pagina.estadoPublicacion = normalizarEstadoPublicacion(estado);
+  guardarDatos(datos, { etiqueta: "Estado de la página" });
+  return pagina;
+}
+
+function listarBibliotecaImagenes() {
+  try {
+    const crudo = localStorage.getItem(CLAVE_BIBLIOTECA);
+    const lista = crudo ? JSON.parse(crudo) : [];
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
+function agregarImagenABiblioteca(nombre, url) {
+  if (!url || !esUrlSegura(url)) throw new Error("URL de imagen no válida.");
+  const imgs = listarBibliotecaImagenes();
+  const entrada = { id: generarId(), nombre: limitarTexto(nombre || "Imagen", 80), url, fecha: Date.now() };
+  imgs.unshift(entrada);
+  localStorage.setItem(CLAVE_BIBLIOTECA, JSON.stringify(imgs.slice(0, MAX_BIBLIOTECA)));
+  return entrada;
+}
+
+function eliminarImagenDeBiblioteca(id) {
+  const imgs = listarBibliotecaImagenes().filter((img) => img.id !== id);
+  localStorage.setItem(CLAVE_BIBLIOTECA, JSON.stringify(imgs));
+}
+
 /* ---------- Reinicio total (por si algo se rompe en clase) ---------- */
 
 function reiniciarTodo() {
@@ -722,7 +1136,7 @@ function reiniciarTodo() {
 
 /* ---------- Autenticación básica ---------- */
 
-const CLAVE_AUTH = "miniwix_auth_v1";
+const CLAVE_AUTH = "autopag_auth_v1";
 
 function hashSimple(texto) {
   let hash = 0;
